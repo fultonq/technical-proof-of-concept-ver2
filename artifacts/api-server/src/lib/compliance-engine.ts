@@ -489,7 +489,18 @@ export function runComplianceChecks(
     alcoholContent?: string | null;
     netContents?: string | null;
   } = {},
+  options: {
+    // When the reviewer pre-selects a beverage type, it overrides what Claude detected.
+    // This is the authoritative value used for all type-specific compliance checks.
+    beverageTypeOverride?: string | null;
+  } = {},
 ): ComplianceResult {
+  // Apply the reviewer's beverage type selection (if any) before running any checks.
+  // All sub-functions receive `eff` so they use the corrected type throughout.
+  const eff: ClaudeExtractionResult = options.beverageTypeOverride
+    ? { ...extraction, beverageType: options.beverageTypeOverride as ClaudeExtractionResult["beverageType"] }
+    : extraction;
+
   const allFlags: ComplianceFlag[] = [];
 
   // ── Brand Name ─────────────────────────────────────────────────────────────
@@ -527,7 +538,7 @@ export function runComplianceChecks(
   );
 
   // ── Alcohol Content (ABV) ───────────────────────────────────────────────────
-  const abvCheck = checkAbv(extraction, expectedValues.alcoholContent ?? null);
+  const abvCheck = checkAbv(eff, expectedValues.alcoholContent ?? null);
   allFlags.push(...abvCheck.flags);
   const abvField = buildFieldResult(
     extraction.alcoholContent.value,
@@ -589,13 +600,13 @@ export function runComplianceChecks(
   );
 
   // ── Country of Origin ───────────────────────────────────────────────────────
-  const countryCheck = checkCountryOfOrigin(extraction);
+  const countryCheck = checkCountryOfOrigin(eff);
   allFlags.push(...countryCheck.flags);
   const countryOfOriginField = countryCheck.field;
 
   // ── Same Field of Vision — SPIRITS ONLY (27 CFR 5.64) ──────────────────────
   let sameFieldOfVisionResult: SameFieldOfVisionResult | null = null;
-  if (extraction.beverageType === "SPIRITS" && extraction.sameFieldOfVision) {
+  if (eff.beverageType === "SPIRITS" && extraction.sameFieldOfVision) {
     const sfov = extraction.sameFieldOfVision;
     sameFieldOfVisionResult = {
       compliant: sfov.allOnSamePanel,
@@ -668,11 +679,11 @@ export function runComplianceChecks(
   );
 
   // ── Appellation of Origin — WINE ONLY ───────────────────────────────────────
-  const appellationCheck = checkAppellationOfOrigin(extraction);
+  const appellationCheck = checkAppellationOfOrigin(eff);
   allFlags.push(...appellationCheck.flags);
 
   // ── Sulfite Declaration — WINE ONLY ─────────────────────────────────────────
-  const sulfiteCheck = checkSulfiteDeclaration(extraction);
+  const sulfiteCheck = checkSulfiteDeclaration(eff);
   allFlags.push(...sulfiteCheck.flags);
 
   // ── Brand name flags aggregation ────────────────────────────────────────────
@@ -713,6 +724,6 @@ export function runComplianceChecks(
     appellationOfOrigin: appellationCheck.field,
     sulfiteDeclaration: sulfiteCheck.field,
     flags: allFlags,
-    beverageType: extraction.beverageType,
+    beverageType: eff.beverageType,
   };
 }

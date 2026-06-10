@@ -24,6 +24,11 @@ export interface LabelUploadInput {
   expectedAlcoholContent?: string | null;
   /** @nullable */
   expectedNetContents?: string | null;
+  /**
+     * Optional — overrides the AI-detected beverage type (SPIRITS, WINE, MALT).
+     * @nullable
+     */
+  expectedBeverageType?: string | null;
 }
 
 export interface LabelBatchInput {

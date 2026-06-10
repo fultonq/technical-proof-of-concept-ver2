@@ -27,7 +27,8 @@ export const UploadLabelBody = zod.object({
   "expectedBrandName": zod.string().nullish(),
   "expectedClassType": zod.string().nullish(),
   "expectedAlcoholContent": zod.string().nullish(),
-  "expectedNetContents": zod.string().nullish()
+  "expectedNetContents": zod.string().nullish(),
+  "expectedBeverageType": zod.string().nullish().describe('Optional — overrides the AI-detected beverage type (SPIRITS, WINE, MALT).')
 })
 
 export const uploadLabelResponseConfidenceScoreMin = 0;

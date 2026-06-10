@@ -50,6 +50,7 @@ router.post(
     const expectedClassType = (req.body as Record<string, string>).expectedClassType ?? null;
     const expectedAlcoholContent = (req.body as Record<string, string>).expectedAlcoholContent ?? null;
     const expectedNetContents = (req.body as Record<string, string>).expectedNetContents ?? null;
+    const expectedBeverageType = (req.body as Record<string, string>).expectedBeverageType || null;
 
     const images: LabelImage[] = [
       { buffer: frontFile.buffer, mimeType: frontFile.mimetype },
@@ -69,6 +70,7 @@ router.post(
         expectedClassType,
         expectedAlcoholContent,
         expectedNetContents,
+        expectedBeverageType,
       });
       res.json(result);
     } catch (err) {

@@ -148,6 +148,7 @@ export default function UploadPage() {
   const [backFile, setBackFile] = useState<File | null>(null);
   const [showBackLabel, setShowBackLabel] = useState(false);
   const [expectedBrandName, setExpectedBrandName] = useState("");
+  const [selectedBeverageType, setSelectedBeverageType] = useState("");
   const [isUploading, setIsUploading] = useState(false);
 
   // ── Batch image mode ────────────────────────────────────────────────────
@@ -180,6 +181,7 @@ export default function UploadPage() {
       formData.append("file", singleFile);
       if (showBackLabel && backFile) formData.append("backFile", backFile);
       if (expectedBrandName.trim()) formData.append("expectedBrandName", expectedBrandName.trim());
+      if (selectedBeverageType) formData.append("expectedBeverageType", selectedBeverageType);
       const res = await fetch("/api/v1/labels/upload", { method: "POST", body: formData });
       if (!res.ok) throw new Error("Upload failed — please try again.");
       const data: LabelAnalysisResult = await res.json();
@@ -423,14 +425,39 @@ export default function UploadPage() {
             </div>
           )}
 
-          <div className="bg-secondary/30 border border-border rounded-xl p-5">
-            <Label htmlFor="expectedBrandName" className="flex items-center gap-2 text-base font-semibold mb-1">
-              <Tag className="w-4 h-4 text-muted-foreground" /> What is the brand name on this label?
-            </Label>
-            <p className="text-sm text-muted-foreground mb-3">Filling this in improves accuracy. Leave blank if you do not know it.</p>
-            <Input id="expectedBrandName" placeholder="e.g. OLD TOM DISTILLERY" value={expectedBrandName}
-              onChange={(e) => setExpectedBrandName(e.target.value)} disabled={isUploading}
-              className="text-base h-12 font-mono max-w-sm" />
+          <div className="bg-secondary/30 border border-border rounded-xl p-5 space-y-5">
+            {/* Beverage type selector */}
+            <div>
+              <Label htmlFor="beverageType" className="flex items-center gap-2 text-base font-semibold mb-1">
+                <Layers className="w-4 h-4 text-muted-foreground" /> Beverage type
+              </Label>
+              <p className="text-sm text-muted-foreground mb-3">
+                Select the type to ensure the correct compliance rules are applied. When in doubt, leave on Auto-detect.
+              </p>
+              <select
+                id="beverageType"
+                value={selectedBeverageType}
+                onChange={(e) => setSelectedBeverageType(e.target.value)}
+                disabled={isUploading}
+                className="h-12 w-full max-w-sm rounded-md border border-input bg-background px-3 py-2 text-base font-medium ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="">Auto-detect</option>
+                <option value="SPIRITS">Distilled Spirits (27 CFR Part 5)</option>
+                <option value="WINE">Wine (27 CFR Part 4)</option>
+                <option value="MALT">Beer / Malt Beverage (27 CFR Part 7)</option>
+              </select>
+            </div>
+
+            {/* Brand name */}
+            <div>
+              <Label htmlFor="expectedBrandName" className="flex items-center gap-2 text-base font-semibold mb-1">
+                <Tag className="w-4 h-4 text-muted-foreground" /> What is the brand name on this label?
+              </Label>
+              <p className="text-sm text-muted-foreground mb-3">Filling this in improves accuracy. Leave blank if you do not know it.</p>
+              <Input id="expectedBrandName" placeholder="e.g. OLD TOM DISTILLERY" value={expectedBrandName}
+                onChange={(e) => setExpectedBrandName(e.target.value)} disabled={isUploading}
+                className="text-base h-12 font-mono max-w-sm" />
+            </div>
           </div>
 
           <div className="flex justify-end pt-2">

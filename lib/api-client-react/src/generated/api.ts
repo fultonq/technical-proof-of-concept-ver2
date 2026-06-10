@@ -148,6 +148,9 @@ if(labelUploadInput.expectedAlcoholContent !== undefined && labelUploadInput.exp
 if(labelUploadInput.expectedNetContents !== undefined && labelUploadInput.expectedNetContents !== null) {
  formData.append(`expectedNetContents`, labelUploadInput.expectedNetContents);
  }
+if(labelUploadInput.expectedBeverageType !== undefined && labelUploadInput.expectedBeverageType !== null) {
+ formData.append(`expectedBeverageType`, labelUploadInput.expectedBeverageType);
+ }
 
   return customFetch<LabelAnalysisResult>(getUploadLabelUrl(),
   {

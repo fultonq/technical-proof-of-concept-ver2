@@ -10,6 +10,9 @@ export interface AnalyzeOptions {
   expectedClassType?: string | null;
   expectedAlcoholContent?: string | null;
   expectedNetContents?: string | null;
+  // When the reviewer pre-selects a beverage type before upload, this overrides what
+  // Claude detects. Valid values: "SPIRITS" | "WINE" | "MALT". Null = auto-detect.
+  expectedBeverageType?: string | null;
 }
 
 // Orchestrates a single label analysis: AI extraction → compliance checks → session storage.
@@ -74,12 +77,16 @@ export async function analyzeLabel(
     return fallbackResult;
   }
 
-  const compliance = runComplianceChecks(extraction, {
-    brandName: options.expectedBrandName,
-    classType: options.expectedClassType,
-    alcoholContent: options.expectedAlcoholContent,
-    netContents: options.expectedNetContents,
-  });
+  const compliance = runComplianceChecks(
+    extraction,
+    {
+      brandName: options.expectedBrandName,
+      classType: options.expectedClassType,
+      alcoholContent: options.expectedAlcoholContent,
+      netContents: options.expectedNetContents,
+    },
+    { beverageTypeOverride: options.expectedBeverageType ?? null },
+  );
 
   const result: LabelAnalysisResult = {
     labelId,
