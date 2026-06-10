@@ -280,9 +280,11 @@ export default function LabelDetailPage() {
               <CardTitle>Evaluator Actions</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Button className="w-full justify-start" variant="outline">
-                <ArrowLeft className="w-4 h-4 mr-2" /> Back to Session
-              </Button>
+              <Link href={`/results/${sessionId}`}>
+                <Button className="w-full justify-start" variant="outline">
+                  <ArrowLeft className="w-4 h-4 mr-2" /> Back to Session
+                </Button>
+              </Link>
               <Button className="w-full justify-start bg-pass text-pass-foreground hover:bg-pass/90">
                 <CheckCircle2 className="w-4 h-4 mr-2" /> Mark as Approved
               </Button>

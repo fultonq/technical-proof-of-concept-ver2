@@ -1,9 +1,11 @@
 import React, { useState, useCallback, useRef } from "react";
 import { useLocation } from "wouter";
-import { UploadCloud, FileImage, Layers, Loader2, X, Plus, AlertCircle } from "lucide-react";
+import { UploadCloud, FileImage, Layers, Loader2, X, Plus, AlertCircle, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { LabelAnalysisResult } from "@workspace/api-client-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -21,6 +23,7 @@ export default function UploadPage() {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState<"single" | "batch">("single");
   const [singleFile, setSingleFile] = useState<File | null>(null);
+  const [expectedBrandName, setExpectedBrandName] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [batchQueue, setBatchQueue] = useState<QueuedFile[]>([]);
   const [batchSessionId, setBatchSessionId] = useState<string | null>(null);
@@ -76,6 +79,9 @@ export default function UploadPage() {
     try {
       const formData = new FormData();
       formData.append("file", singleFile);
+      if (expectedBrandName.trim()) {
+        formData.append("expectedBrandName", expectedBrandName.trim());
+      }
       
       const response = await fetch("/api/v1/labels/upload", {
         method: "POST",
@@ -202,14 +208,31 @@ export default function UploadPage() {
             </CardContent>
           </Card>
           
-          <div className="mt-6 flex justify-end">
-            <Button size="lg" disabled={!singleFile || isUploading} onClick={uploadSingle} className="px-8 font-semibold">
-              {isUploading ? (
-                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Analyzing...</>
-              ) : (
-                "Analyze Label"
-              )}
-            </Button>
+          <div className="mt-6 space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="expectedBrandName" className="flex items-center gap-1.5 text-sm font-medium">
+                <Tag className="w-3.5 h-3.5 text-muted-foreground" />
+                Expected Brand Name
+                <span className="text-muted-foreground font-normal">(optional — enables exact brand name matching)</span>
+              </Label>
+              <Input
+                id="expectedBrandName"
+                placeholder="e.g. OLD TOM DISTILLERY"
+                value={expectedBrandName}
+                onChange={(e) => setExpectedBrandName(e.target.value)}
+                disabled={isUploading}
+                className="max-w-sm font-mono"
+              />
+            </div>
+            <div className="flex justify-end">
+              <Button size="lg" disabled={!singleFile || isUploading} onClick={uploadSingle} className="px-8 font-semibold">
+                {isUploading ? (
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Analyzing...</>
+                ) : (
+                  "Analyze Label"
+                )}
+              </Button>
+            </div>
           </div>
         </TabsContent>
 
