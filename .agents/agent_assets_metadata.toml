@@ -1,0 +1,13 @@
+uploads = []
+
+[[generated]]
+id = "Ct723eqWoUU7JJ5JegrvI"
+uri = "file://attached_assets/old-tom-distillery-label.png"
+type = "image"
+title = "old tom distillery bourbon label"
+
+[[outputs]]
+id = "9uKUrz1xhesfqhVGvUwA3"
+uri = "file://attached_assets/old-tom-distillery-label.png"
+type = "image"
+title = "Old Tom Distillery — Sample TTB Label"
