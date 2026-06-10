@@ -6,8 +6,11 @@ import { Button } from "@/components/ui/button";
 import { exportSessionToCSV } from "@/lib/csv-export";
 import { generatePrintReport } from "@/lib/print-report";
 import {
+  getSessionReviewActions, DECISION_LABELS, DECISION_STYLES,
+} from "@/lib/review-actions";
+import {
   ArrowLeft, Download, Plus, Search, Loader2, AlertCircle,
-  CheckCircle2, XCircle, Clock, MessageSquare, Printer,
+  CheckCircle2, XCircle, Clock, MessageSquare, Printer, ShieldCheck, ShieldX, ShieldAlert,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -21,6 +24,18 @@ export default function ResultsPage() {
   });
 
   const [searchTerm, setSearchTerm] = React.useState("");
+
+  // ── Per-label review decisions, loaded from localStorage ──────────────────
+  const [reviewActions, setReviewActions] = React.useState<Record<string, ReturnType<typeof getSessionReviewActions>[string]>>({});
+  React.useEffect(() => {
+    if (!sessionData) return;
+    const ids = sessionData.results.map(r => r.labelId);
+    setReviewActions(getSessionReviewActions(ids));
+    // Refresh when the tab becomes visible again (agent may have made decisions on detail page)
+    const onFocus = () => setReviewActions(getSessionReviewActions(ids));
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [sessionData]);
 
   // ── Per-label reviewer comments, persisted to localStorage ────────────────
   const [comments, setComments] = React.useState<Record<string, string>>(() => {
@@ -44,7 +59,7 @@ export default function ResultsPage() {
   // ── Print report ───────────────────────────────────────────────────────────
   const printReport = () => {
     if (!sessionData) return;
-    const html = generatePrintReport(sessionData, comments, sessionId);
+    const html = generatePrintReport(sessionData, comments, sessionId, reviewActions);
     const win = window.open("", "_blank");
     if (!win) {
       alert("Pop-up blocked — please allow pop-ups for this site and try again.");
@@ -174,15 +189,16 @@ export default function ResultsPage() {
               <tr>
                 <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">Label File</th>
                 <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">Brand Found</th>
-                <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">Result</th>
+                <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">AI Result</th>
                 <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">Issues</th>
+                <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">Decision</th>
                 <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {filteredResults.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-5 py-16 text-center text-lg text-muted-foreground">
+                  <td colSpan={6} className="px-5 py-16 text-center text-lg text-muted-foreground">
                     No labels match your search.
                   </td>
                 </tr>
@@ -190,6 +206,8 @@ export default function ResultsPage() {
                 filteredResults.map((result) => {
                   const hasComment = !!comments[result.labelId]?.trim();
                   const isCommentOpen = openCommentId === result.labelId;
+                  const action = reviewActions[result.labelId] ?? null;
+                  const dStyle = action ? DECISION_STYLES[action.decision] : null;
 
                   return (
                     <React.Fragment key={result.labelId}>
@@ -213,6 +231,19 @@ export default function ResultsPage() {
                             : <span className="text-pass font-semibold flex items-center gap-1.5">
                                 <CheckCircle2 className="w-4 h-4" /> None
                               </span>}
+                        </td>
+                        {/* ── Decision column ─────────────────────────── */}
+                        <td className="px-5 py-4">
+                          {action && dStyle ? (
+                            <span className={`inline-flex items-center gap-1.5 text-sm font-bold px-2.5 py-1 rounded-full border ${dStyle.bg} ${dStyle.text} ${dStyle.border}`}>
+                              {action.decision === "APPROVED" || action.decision === "OVERRIDE_APPROVED"
+                                ? <ShieldCheck className="w-3.5 h-3.5" />
+                                : <ShieldX className="w-3.5 h-3.5" />}
+                              {DECISION_LABELS[action.decision]}
+                            </span>
+                          ) : (
+                            <span className="text-sm text-muted-foreground italic">Pending</span>
+                          )}
                         </td>
                         <td className="px-5 py-4">
                           <div className="flex items-center justify-end gap-2">
@@ -243,7 +274,7 @@ export default function ResultsPage() {
                       {/* Expandable comment row */}
                       {isCommentOpen && (
                         <tr>
-                          <td colSpan={5} className="px-5 py-4 bg-secondary/10 border-b border-primary/10">
+                          <td colSpan={6} className="px-5 py-4 bg-secondary/10 border-b border-primary/10">
                             <div className="flex items-start gap-3 max-w-2xl">
                               <MessageSquare className="w-4 h-4 text-primary mt-2.5 shrink-0" />
                               <div className="flex-1">

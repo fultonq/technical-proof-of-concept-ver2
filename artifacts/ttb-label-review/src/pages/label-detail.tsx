@@ -1,21 +1,35 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRoute, Link } from "wouter";
 import { useGetLabelResult, getGetLabelResultQueryKey } from "@workspace/api-client-react";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ConfidenceBar } from "@/components/ui/confidence-bar";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, AlertTriangle, Info, CheckCircle2, XCircle, Clock, Loader2, AlertCircle, ChevronDown, ChevronUp, Wrench, Images } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  ArrowLeft, AlertTriangle, Info, CheckCircle2, XCircle, Clock, Loader2,
+  AlertCircle, ChevronDown, ChevronUp, Wrench, Images, ShieldCheck, ShieldX,
+  FileWarning, RotateCcw,
+} from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { getCorrections } from "@/lib/corrections";
+import {
+  getReviewAction, setReviewAction, buildCorrectionTemplate,
+  DECISION_LABELS, DECISION_STYLES,
+  type ReviewAction, type ReviewDecision,
+} from "@/lib/review-actions";
+
+// ── Small helpers ──────────────────────────────────────────────────────────
 
 function FlagIcon({ severity }: { severity: string }) {
-  if (severity === "ERROR") return <AlertCircle className="w-5 h-5 text-fail shrink-0" />;
+  if (severity === "ERROR")   return <AlertCircle className="w-5 h-5 text-fail shrink-0" />;
   if (severity === "WARNING") return <AlertTriangle className="w-5 h-5 text-review shrink-0" />;
   return <Info className="w-5 h-5 text-blue-500 shrink-0" />;
 }
 
-// Human-readable labels for each field key. Used in the field table header column.
 const FIELD_LABELS: Record<string, string> = {
   brandName: "Brand Name",
   classType: "Type of Beverage",
@@ -25,29 +39,62 @@ const FIELD_LABELS: Record<string, string> = {
   countryOfOrigin: "Country of Origin",
   labelLanguage: "Label Language",
   prohibitedSurface: "Prohibited Content",
-  // Wine-specific
   appellationOfOrigin: "Appellation of Origin",
   sulfiteDeclaration: "Sulfite Declaration",
 };
 
-// Human-readable beverage type names for the breadcrumb / info line.
 const BEVERAGE_TYPE_LABELS: Record<string, string> = {
   SPIRITS: "Distilled Spirits (27 CFR Part 5)",
-  WINE: "Wine (27 CFR Part 4)",
-  MALT: "Beer / Malt Beverage (27 CFR Part 7)",
+  WINE:    "Wine (27 CFR Part 4)",
+  MALT:    "Beer / Malt Beverage (27 CFR Part 7)",
   UNKNOWN: "Unknown Beverage Type",
 };
+
+const MIN_OVERRIDE_CHARS = 40;
+
+// ── Main page ──────────────────────────────────────────────────────────────
 
 export default function LabelDetailPage() {
   const [, params] = useRoute("/results/:sessionId/:labelId");
   const sessionId = params?.sessionId || "";
-  const labelId = params?.labelId || "";
+  const labelId   = params?.labelId   || "";
 
   const { data: result, isLoading, isError, error } = useGetLabelResult(labelId, {
-    query: { enabled: !!labelId, queryKey: getGetLabelResultQueryKey(labelId) }
+    query: { enabled: !!labelId, queryKey: getGetLabelResultQueryKey(labelId) },
   });
 
   const [expandedCorrection, setExpandedCorrection] = useState<string | null>(null);
+
+  // ── Review action state ────────────────────────────────────────────────
+  const [reviewAction, setLocalReviewAction] = useState<ReviewAction | null>(null);
+  useEffect(() => {
+    if (labelId) setLocalReviewAction(getReviewAction(labelId));
+  }, [labelId]);
+
+  const saveAction = (action: ReviewAction) => {
+    setReviewAction(labelId, action);
+    setLocalReviewAction(action);
+  };
+
+  // ── Approve dialog ─────────────────────────────────────────────────────
+  const [showApproveDialog, setShowApproveDialog] = useState(false);
+  const [overrideNote, setOverrideNote] = useState("");
+
+  // ── Correction notice dialog ───────────────────────────────────────────
+  const [showCorrectionDialog, setShowCorrectionDialog] = useState(false);
+  const [correctionText, setCorrectionText] = useState("");
+
+  const openCorrectionDialog = () => {
+    if (!result) return;
+    // Pre-populate with template only on first open; otherwise keep what was saved.
+    const existing = reviewAction?.correctionNotice;
+    setCorrectionText(
+      existing && existing.trim()
+        ? existing
+        : buildCorrectionTemplate(result.fileName, sessionId, result.beverageType, result.flags),
+    );
+    setShowCorrectionDialog(true);
+  };
 
   if (isLoading) {
     return (
@@ -73,42 +120,78 @@ export default function LabelDetailPage() {
     );
   }
 
-  const status = result.overallStatus;
+  const status    = result.overallStatus;
   const flagCount = result.flags.filter(f => f.severity === "ERROR").length;
-  const isWine = result.beverageType === "WINE";
+  const isWine    = result.beverageType === "WINE";
 
-  // Collect every field key that has FAIL or NEEDS_REVIEW status for the corrections panel.
+  // Collect failing field keys for the corrections panel.
   const failingFieldKeys: string[] = [];
   const coreFieldKeys = ["brandName","classType","alcoholContent","netContents","bottlerProducer","countryOfOrigin","labelLanguage","prohibitedSurface"] as const;
   for (const key of coreFieldKeys) {
     const field = result[key as keyof typeof result] as any;
-    if (field && (field.matchStatus === "FAIL" || field.matchStatus === "NEEDS_REVIEW")) {
-      failingFieldKeys.push(key);
-    }
+    if (field && (field.matchStatus === "FAIL" || field.matchStatus === "NEEDS_REVIEW")) failingFieldKeys.push(key);
   }
-  if (result.sameFieldOfVision && !result.sameFieldOfVision.compliant) {
-    failingFieldKeys.push("sameFieldOfVision");
-  }
+  if (result.sameFieldOfVision && !result.sameFieldOfVision.compliant) failingFieldKeys.push("sameFieldOfVision");
   if (isWine) {
-    if (result.appellationOfOrigin && (result.appellationOfOrigin.matchStatus === "FAIL" || result.appellationOfOrigin.matchStatus === "NEEDS_REVIEW")) {
-      failingFieldKeys.push("appellationOfOrigin");
-    }
-    if (result.sulfiteDeclaration && (result.sulfiteDeclaration.matchStatus === "FAIL" || result.sulfiteDeclaration.matchStatus === "NEEDS_REVIEW")) {
-      failingFieldKeys.push("sulfiteDeclaration");
-    }
+    if (result.appellationOfOrigin && (result.appellationOfOrigin.matchStatus === "FAIL" || result.appellationOfOrigin.matchStatus === "NEEDS_REVIEW")) failingFieldKeys.push("appellationOfOrigin");
+    if (result.sulfiteDeclaration  && (result.sulfiteDeclaration.matchStatus  === "FAIL" || result.sulfiteDeclaration.matchStatus  === "NEEDS_REVIEW")) failingFieldKeys.push("sulfiteDeclaration");
   }
   const corrections = getCorrections(failingFieldKeys);
 
-  // All core field rows to render in the table (wine-specific appended when appropriate)
   const tableFieldKeys: string[] = [
     "brandName","classType","alcoholContent","netContents","bottlerProducer","countryOfOrigin","labelLanguage","prohibitedSurface",
     ...(isWine ? ["appellationOfOrigin","sulfiteDeclaration"] : []),
   ];
 
+  // Whether clicking Approve requires the override flow (FAIL or REVIEW)
+  const requiresOverride = status === "FAIL" || status === "REVIEW";
+
+  const handleApprove = () => {
+    if (requiresOverride) {
+      setOverrideNote("");
+      setShowApproveDialog(true);
+    } else {
+      // PASS — direct approval
+      saveAction({
+        decision: "APPROVED",
+        note: "",
+        correctionNotice: reviewAction?.correctionNotice ?? "",
+        actionDate: new Date().toISOString(),
+      });
+    }
+  };
+
+  const handleConfirmOverride = () => {
+    saveAction({
+      decision: "OVERRIDE_APPROVED",
+      note: overrideNote.trim(),
+      correctionNotice: reviewAction?.correctionNotice ?? "",
+      actionDate: new Date().toISOString(),
+    });
+    setShowApproveDialog(false);
+  };
+
+  const handleIssueCorrection = () => {
+    saveAction({
+      decision: "CORRECTION_ISSUED",
+      note: reviewAction?.note ?? "",
+      correctionNotice: correctionText.trim(),
+      actionDate: new Date().toISOString(),
+    });
+    setShowCorrectionDialog(false);
+  };
+
+  const handleReset = () => {
+    try { localStorage.removeItem(`ttb-review-${labelId}`); } catch { /* noop */ }
+    setLocalReviewAction(null);
+  };
+
+  const decisionStyle = reviewAction ? DECISION_STYLES[reviewAction.decision] : null;
+
   return (
     <div className="flex-1 flex flex-col pb-20">
 
-      {/* ── VERDICT BANNER ─────────────────────────────────── */}
+      {/* ── VERDICT BANNER ──────────────────────────────────────────────── */}
       {status === "PASS" && (
         <div className="bg-pass text-pass-foreground px-6 py-8">
           <div className="max-w-5xl mx-auto flex items-center gap-5">
@@ -147,7 +230,7 @@ export default function LabelDetailPage() {
         </div>
       )}
 
-      {/* ── BREADCRUMB + FILE NAME ──────────────────────────── */}
+      {/* ── BREADCRUMB ─────────────────────────────────────────────────── */}
       <div className="bg-card border-b border-border px-6 py-5 shadow-sm">
         <div className="max-w-5xl mx-auto">
           <div className="flex items-center gap-2 text-base text-muted-foreground mb-1">
@@ -170,10 +253,10 @@ export default function LabelDetailPage() {
         </div>
       </div>
 
-      {/* ── MAIN CONTENT ──────────────────────────────────────── */}
+      {/* ── MAIN CONTENT ─────────────────────────────────────────────────── */}
       <div className="max-w-5xl mx-auto w-full p-6 grid grid-cols-1 lg:grid-cols-3 gap-8">
 
-        {/* Left: field results */}
+        {/* Left: field results ──────────────────────────────────────────── */}
         <div className="lg:col-span-2 space-y-8">
 
           {/* Field-by-field table */}
@@ -287,14 +370,12 @@ export default function LabelDetailPage() {
             </Card>
           )}
 
-          {/* Wine-specific notice */}
+          {/* Wine-specific fields */}
           {isWine && (
             <Card className="shadow-sm border-primary/20">
               <CardHeader className="border-b border-border bg-primary/5 pb-4">
                 <CardTitle className="text-xl text-primary">Wine-Specific Requirements</CardTitle>
-                <CardDescription className="text-base">
-                  Additional checks that apply under 27 CFR Part 4.
-                </CardDescription>
+                <CardDescription className="text-base">Additional checks that apply under 27 CFR Part 4.</CardDescription>
               </CardHeader>
               <CardContent className="pt-5 space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -335,10 +416,10 @@ export default function LabelDetailPage() {
           )}
         </div>
 
-        {/* Right: flags + actions */}
+        {/* Right: sidebar ──────────────────────────────────────────────── */}
         <div className="space-y-6">
 
-          {/* Problems found */}
+          {/* Problems Found */}
           <Card className="shadow-sm border-t-4 border-t-primary">
             <CardHeader className="border-b border-border pb-3">
               <CardTitle className="text-xl flex items-center justify-between">
@@ -371,17 +452,14 @@ export default function LabelDetailPage() {
             </CardContent>
           </Card>
 
-          {/* How to Fix This */}
+          {/* How to Fix */}
           {corrections.length > 0 && (
             <Card className="shadow-sm border-t-4 border-t-review">
               <CardHeader className="border-b border-border pb-3">
                 <CardTitle className="text-xl flex items-center gap-2">
-                  <Wrench className="w-5 h-5 text-review" />
-                  How to Fix This
+                  <Wrench className="w-5 h-5 text-review" /> How to Fix This
                 </CardTitle>
-                <CardDescription className="text-base">
-                  Step-by-step corrections for each problem found.
-                </CardDescription>
+                <CardDescription className="text-base">Step-by-step corrections for each problem found.</CardDescription>
               </CardHeader>
               <CardContent className="p-0">
                 <div className="divide-y divide-border">
@@ -394,18 +472,14 @@ export default function LabelDetailPage() {
                           onClick={() => setExpandedCorrection(isOpen ? null : key)}
                         >
                           <span className="font-bold text-base text-foreground">{guide.title}</span>
-                          {isOpen
-                            ? <ChevronUp className="w-5 h-5 text-muted-foreground shrink-0" />
-                            : <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />}
+                          {isOpen ? <ChevronUp className="w-5 h-5 text-muted-foreground shrink-0" /> : <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />}
                         </button>
                         {isOpen && (
                           <div className="px-5 pb-5 bg-secondary/10">
                             <ol className="space-y-3 list-none">
                               {guide.steps.map((step, i) => (
                                 <li key={i} className="flex gap-3 items-start">
-                                  <span className="shrink-0 w-7 h-7 rounded-full bg-review/20 text-review font-black text-sm flex items-center justify-center mt-0.5">
-                                    {i + 1}
-                                  </span>
+                                  <span className="shrink-0 w-7 h-7 rounded-full bg-review/20 text-review font-black text-sm flex items-center justify-center mt-0.5">{i + 1}</span>
                                   <p className="text-base text-foreground leading-relaxed">{step}</p>
                                 </li>
                               ))}
@@ -420,7 +494,7 @@ export default function LabelDetailPage() {
             </Card>
           )}
 
-          {/* Actions */}
+          {/* ── What to Do Next ─────────────────────────────────────────── */}
           <Card className="shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-xl">What to Do Next</CardTitle>
@@ -431,17 +505,181 @@ export default function LabelDetailPage() {
                   <ArrowLeft className="w-5 h-5 mr-2" /> Back to All Results
                 </Button>
               </Link>
-              <Button className="w-full justify-start text-base py-3 h-auto bg-pass text-pass-foreground hover:bg-pass/90">
-                <CheckCircle2 className="w-5 h-5 mr-2" /> Mark as Approved
-              </Button>
-              <Button className="w-full justify-start text-base py-3 h-auto bg-fail text-fail-foreground hover:bg-fail/90">
-                <XCircle className="w-5 h-5 mr-2" /> Issue Correction Notice
-              </Button>
+
+              {/* ── Review decision status ─────────────────────────────── */}
+              {reviewAction && decisionStyle && (
+                <div className={`rounded-xl border-2 p-4 ${decisionStyle.bg} ${decisionStyle.border}`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    {reviewAction.decision === "APPROVED"          && <ShieldCheck className={`w-5 h-5 ${decisionStyle.text}`} />}
+                    {reviewAction.decision === "OVERRIDE_APPROVED" && <ShieldCheck className={`w-5 h-5 ${decisionStyle.text}`} />}
+                    {reviewAction.decision === "CORRECTION_ISSUED" && <ShieldX className={`w-5 h-5 ${decisionStyle.text}`} />}
+                    <span className={`font-black text-base uppercase tracking-wide ${decisionStyle.text}`}>
+                      {DECISION_LABELS[reviewAction.decision]}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    {new Date(reviewAction.actionDate).toLocaleString("en-US", {
+                      month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit",
+                    })}
+                  </p>
+                  {reviewAction.note && (
+                    <p className="text-sm italic text-foreground leading-snug border-t border-border/40 pt-2 mt-2">
+                      &ldquo;{reviewAction.note}&rdquo;
+                    </p>
+                  )}
+                  <button
+                    onClick={handleReset}
+                    className="mt-3 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <RotateCcw className="w-3 h-3" /> Reset decision
+                  </button>
+                </div>
+              )}
+
+              {/* ── Approve button ─────────────────────────────────────── */}
+              {(!reviewAction || reviewAction.decision === "CORRECTION_ISSUED") && (
+                <Button
+                  className={`w-full justify-start text-base py-3 h-auto ${
+                    requiresOverride
+                      ? "bg-review text-review-foreground hover:bg-review/90"
+                      : "bg-pass text-pass-foreground hover:bg-pass/90"
+                  }`}
+                  onClick={handleApprove}
+                >
+                  <CheckCircle2 className="w-5 h-5 mr-2" />
+                  {requiresOverride ? "Approve with Override…" : "Mark as Approved"}
+                </Button>
+              )}
+
+              {/* ── Issue Correction Notice button ─────────────────────── */}
+              {(!reviewAction || reviewAction.decision !== "CORRECTION_ISSUED") && (
+                <Button
+                  className="w-full justify-start text-base py-3 h-auto bg-fail text-fail-foreground hover:bg-fail/90"
+                  onClick={openCorrectionDialog}
+                >
+                  <FileWarning className="w-5 h-5 mr-2" /> Issue Correction Notice…
+                </Button>
+              )}
+
+              {/* Re-issue correction notice after one was already issued */}
+              {reviewAction?.decision === "CORRECTION_ISSUED" && (
+                <Button
+                  variant="outline"
+                  className="w-full justify-start text-base py-3 h-auto text-fail border-fail/30"
+                  onClick={openCorrectionDialog}
+                >
+                  <FileWarning className="w-5 h-5 mr-2" /> View / Edit Correction Notice
+                </Button>
+              )}
             </CardContent>
           </Card>
-
         </div>
       </div>
+
+      {/* ════════════════════════════════════════════════════════════════════
+          APPROVE DIALOG (override flow for FAIL / REVIEW)
+          ════════════════════════════════════════════════════════════════════ */}
+      <Dialog open={showApproveDialog} onOpenChange={setShowApproveDialog}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <AlertTriangle className="w-5 h-5 text-review shrink-0" />
+              {status === "FAIL" ? "This Label Has Failed Compliance Checks" : "This Label Requires Human Review"}
+            </DialogTitle>
+            <DialogDescription className="text-base">
+              {status === "FAIL"
+                ? "This label cannot be approved without a written override justification. The following compliance errors were found:"
+                : "The AI flagged one or more fields as low-confidence. If you wish to approve, document your verification below:"}
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Flag list */}
+          {result.flags.length > 0 && (
+            <div className="rounded-lg border border-border bg-secondary/20 divide-y divide-border max-h-48 overflow-y-auto">
+              {result.flags.map((flag, i) => (
+                <div key={i} className="flex items-start gap-2 px-4 py-2.5">
+                  <FlagIcon severity={flag.severity} />
+                  <div>
+                    <p className="text-sm font-bold text-foreground">{FIELD_LABELS[flag.field] ?? flag.field}</p>
+                    <p className="text-sm text-muted-foreground leading-snug">{flag.message}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <p className="text-sm font-semibold text-foreground">
+              Override justification <span className="text-fail">*</span>
+            </p>
+            <p className="text-xs text-muted-foreground">
+              You must provide a written reason with at least {MIN_OVERRIDE_CHARS} characters. This note will be included in the audit report.
+            </p>
+            <Textarea
+              autoFocus
+              rows={4}
+              placeholder="e.g. Physical inspection confirmed government warning is present on adhesive back panel not captured in photo. Approving on that basis."
+              value={overrideNote}
+              onChange={(e) => setOverrideNote(e.target.value)}
+              className="text-sm resize-none"
+            />
+            <p className={`text-xs text-right ${overrideNote.length >= MIN_OVERRIDE_CHARS ? "text-pass font-semibold" : "text-muted-foreground"}`}>
+              {overrideNote.length} / {MIN_OVERRIDE_CHARS} characters required
+            </p>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowApproveDialog(false)}>Cancel</Button>
+            <Button
+              disabled={overrideNote.trim().length < MIN_OVERRIDE_CHARS}
+              onClick={handleConfirmOverride}
+              className="bg-review text-review-foreground hover:bg-review/90"
+            >
+              <ShieldCheck className="w-4 h-4 mr-2" /> Override &amp; Approve
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ════════════════════════════════════════════════════════════════════
+          CORRECTION NOTICE DIALOG
+          ════════════════════════════════════════════════════════════════════ */}
+      <Dialog open={showCorrectionDialog} onOpenChange={setShowCorrectionDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <FileWarning className="w-5 h-5 text-fail shrink-0" />
+              Issue Correction Notice
+            </DialogTitle>
+            <DialogDescription className="text-base">
+              The notice below has been pre-filled with all compliance failures. Edit it as needed before issuing. A copy will be saved to this label&apos;s record.
+            </DialogDescription>
+          </DialogHeader>
+
+          <Textarea
+            rows={18}
+            value={correctionText}
+            onChange={(e) => setCorrectionText(e.target.value)}
+            className="text-sm font-mono resize-y leading-relaxed"
+          />
+
+          <p className="text-xs text-muted-foreground">
+            Email notifications to the applicant are not yet implemented. Save or print this notice to deliver it manually.
+          </p>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowCorrectionDialog(false)}>Cancel</Button>
+            <Button
+              disabled={!correctionText.trim()}
+              onClick={handleIssueCorrection}
+              className="bg-fail text-fail-foreground hover:bg-fail/90"
+            >
+              <ShieldX className="w-4 h-4 mr-2" /> Issue Correction Notice
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }
