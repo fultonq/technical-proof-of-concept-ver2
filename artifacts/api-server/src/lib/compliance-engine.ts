@@ -8,15 +8,27 @@ import type {
   SameFieldOfVisionResult,
 } from "./label-types.js";
 
+// Verbatim statutory text from 27 CFR 16.21.
+// The government warning check performs a word-for-word comparison against this string
+// (after whitespace normalization). Any deviation — including added/removed words,
+// punctuation changes, or capitalisation differences — results in a FAIL.
 const REQUIRED_GOVERNMENT_WARNING =
   "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.";
 
+// Minimum confidence score (0.0–1.0) from the AI extraction below which a field is
+// considered insufficiently certain for automated PASS/FAIL and is escalated to NEEDS_REVIEW.
+// Exception: the sameFieldOfVision check uses a stricter threshold of 0.75 (see below) because
+// panel layout is harder to assess from a single image and false positives are more harmful.
 const CONFIDENCE_THRESHOLD = 0.6;
 
+// Collapses any sequence of whitespace (tabs, newlines, multiple spaces) to a single space.
+// Used only for the government warning verbatim comparison, which is sensitive to whitespace.
 function normalizeWhitespace(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
+// Standard Levenshtein edit-distance implementation.
+// Used for brand name fuzzy matching — see matchBrandName below.
 function levenshtein(a: string, b: string): number {
   const m = a.length;
   const n = b.length;
@@ -35,6 +47,15 @@ function levenshtein(a: string, b: string): number {
   return dp[m][n];
 }
 
+// Prepares a brand name string for comparison by:
+//   1. Lowercasing — so 'STONE'S THROW' and 'Stone's Throw' are treated as equal.
+//   2. Unicode NFC normalization — ensures composed characters are in canonical form.
+//   3. Replacing 9 apostrophe/quote Unicode variants (curly singles, modifier letter,
+//      prime, grave, backtick, half-width) with a plain straight apostrophe U+0027.
+//      This handles the common case where AI vision returns a curly apostrophe from the
+//      image while the agent typed a straight apostrophe in the expected-value field.
+//   4. Stripping all remaining punctuation/symbols (replaced with spaces).
+//   5. Collapsing multiple spaces.
 function normalizeBrandName(s: string): string {
   return s
     .toLowerCase()
@@ -49,6 +70,23 @@ function normalizeBrandName(s: string): string {
     .trim();
 }
 
+// Compares the AI-extracted brand name against the agent-supplied expected value.
+//
+// Matching rules (applied after normalizeBrandName on both sides):
+//   - Exact match after normalization → PASS
+//   - Levenshtein distance ≤ 3 → NEEDS_REVIEW (near-match, agent confirms)
+//   - Distance > 3 → FAIL
+//
+// Edge cases:
+//   - No extracted value → FAIL (brand name not found on label at all)
+//   - No expected value supplied → PASS if confidence ≥ CONFIDENCE_THRESHOLD,
+//     NEEDS_REVIEW otherwise. NOTE: when no expected value is provided, ONLY
+//     presence is verified — the brand name content is not validated against any
+//     COLA registration. A completely wrong brand name will PASS with high confidence.
+//   - The Levenshtein threshold of 3 is intentionally permissive for long names
+//     (e.g. "Old Fitzgerald" has plenty of budget for OCR noise) but is very generous
+//     for short names — e.g. a 3-char brand name could match any other with distance ≤ 3.
+//     Agents should pay close attention to NEEDS_REVIEW results on short brand names.
 function matchBrandName(
   extracted: string | null,
   expected: string | null,
@@ -85,6 +123,20 @@ function matchBrandName(
   };
 }
 
+// Validates the Government Warning statement against three distinct failure modes:
+//   1. MISSING — statement is absent entirely → FAIL
+//   2. PREFIX CAPITALISATION — "GOVERNMENT WARNING:" prefix is not ALL CAPS → FAIL
+//      (27 CFR 16.21 explicitly requires the prefix in all-capital letters)
+//   3. TEXT MISMATCH — body text differs from the exact statutory wording → FAIL
+//      The comparison is case-sensitive at the character level (after whitespace
+//      normalisation) because the statute specifies the exact wording including casing.
+//      Upper-casing both sides first catches a capitalisation-only mismatch separately
+//      from a word/spelling mismatch, so each gets its own distinct flag message.
+//   4. PROHIBITED LOCATION — warning found on bottom, cap/closure, or foil capsule → FAIL
+//      This check is additive: a warning can fail both text AND location simultaneously.
+//
+// Note: multiple flags can be pushed in one call (e.g. wrong prefix AND wrong location).
+// The matchStatus is downgraded to FAIL on the first error encountered and stays there.
 function checkGovernmentWarning(
   extraction: ClaudeExtractionResult,
 ): { matchStatus: MatchStatus; failReason: string | null; flags: ComplianceFlag[] } {
@@ -135,6 +187,8 @@ function checkGovernmentWarning(
     const requiredUpper = normalizedRequired.toUpperCase();
 
     if (extractedUpper === requiredUpper) {
+      // Text matches when both sides are uppercased → pure capitalisation mismatch.
+      // This is a separate, less severe error than a word/spelling mismatch.
       if (matchStatus === "PASS") {
         matchStatus = "FAIL";
         failReason = "Government Warning text capitalization does not match required statutory text";
@@ -145,6 +199,7 @@ function checkGovernmentWarning(
         message: "Government Warning capitalization differs from required statutory text.",
       });
     } else {
+      // Texts differ even when uppercased → word or spelling mismatch.
       matchStatus = "FAIL";
       failReason = failReason ?? "Government Warning text does not match required statutory text";
       flags.push({
@@ -155,6 +210,10 @@ function checkGovernmentWarning(
     }
   }
 
+  // Prohibited surface check for the government warning location.
+  // Uses .split("/")[0] so "cap/closure" matches on "cap" — also correctly matches
+  // the standalone "foil capsule" string. "bottom" is checked as a substring so
+  // "bottom of container" also triggers this flag.
   if (location && ["bottom", "cap/closure", "foil capsule"].some((s) => location.toLowerCase().includes(s.split("/")[0]))) {
     matchStatus = "FAIL";
     failReason = failReason ?? `Government Warning on prohibited surface: ${location}`;
@@ -168,6 +227,20 @@ function checkGovernmentWarning(
   return { matchStatus, failReason, flags };
 }
 
+// Validates Alcohol Content (ABV).
+//
+// Mandatory status is determined by Claude during extraction (isMandatory field):
+//   - SPIRITS and WINE ≥7% ABV → mandatory
+//   - MALT beverages under standard fermentation → not mandatory (isMandatory = false)
+//
+// Edge cases:
+//   - beverageType = UNKNOWN → cannot determine mandatory status → NEEDS_REVIEW.
+//     This prevents false FAILs when Claude cannot classify the beverage.
+//   - isMandatory = false AND value present → PASS (bonus info, not a violation).
+//   - isMandatory = false AND value absent → NOT_APPLICABLE (no check needed).
+//   - When expectedAbv is provided, comparison is case-insensitive and strips all
+//     whitespace before comparing ("40%Alc./Vol." == "40% Alc./Vol."). This is a
+//     loose match — it does not parse numeric values, so "40%" ≠ "40.0%".
 function checkAbv(
   extraction: ClaudeExtractionResult,
   expectedAbv: string | null,
@@ -209,6 +282,8 @@ function checkAbv(
 
   if (!expectedAbv) return { matchStatus: "PASS", failReason: null, flags };
 
+  // Loose string comparison: case-insensitive, whitespace stripped.
+  // Does NOT parse numeric ABV values, so "40%" and "40.0%" are treated as different strings.
   const normExtracted = value.toLowerCase().replace(/\s+/g, "");
   const normExpected = expectedAbv.toLowerCase().replace(/\s+/g, "");
   if (normExtracted !== normExpected) {
@@ -227,6 +302,8 @@ function checkAbv(
   return { matchStatus: "PASS", failReason: null, flags };
 }
 
+// Thin constructor for FieldResult — exists so every call site has the same shape
+// and property order. No logic; callers supply all values.
 function buildFieldResult(
   extractedValue: string | null,
   expectedValue: string | null,
@@ -238,6 +315,19 @@ function buildFieldResult(
   return { extractedValue, expectedValue, matchStatus, confidence, failReason, isMandatory };
 }
 
+// Checks a single field for presence and confidence.
+// Returns the MatchStatus and pushes any generated flags into the caller-supplied array.
+//
+// NOTE ON PATTERN: checkGovernmentWarning and checkAbv return their flags in the result
+// object. This function mutates a caller-supplied array instead — an inconsistency left
+// intentional because those two checks have more complex multi-flag logic that doesn't
+// fit the presence-only pattern. Both patterns are correct; do not merge them.
+//
+// IMPORTANT: This function only checks whether the field is present with sufficient
+// confidence. It does NOT compare against an expected value even when one is provided.
+// The expectedValue is stored on FieldResult for UI display only (e.g. classType,
+// netContents). If content comparison is needed for a field, use a dedicated checker
+// function like matchBrandName or checkAbv.
 function simplePresenceCheck(
   fieldName: string,
   value: string | null,
@@ -275,6 +365,25 @@ export interface ComplianceResult {
   beverageType: BeverageType;
 }
 
+// Orchestrates all per-field compliance checks and aggregates them into a single result.
+//
+// Overall status logic (in priority order):
+//   FAIL   — any flag with severity ERROR
+//   REVIEW — any flag with severity WARNING, or any field with matchStatus NEEDS_REVIEW,
+//             or sameFieldOfVision non-compliant / low-confidence
+//   PASS   — none of the above
+//
+// Field coverage:
+//   brandName        — fuzzy match (Levenshtein) if expected value supplied, else presence
+//   classType        — presence only (expected value stored but not compared)
+//   alcoholContent   — mandatory for SPIRITS and WINE ≥7%; conditional for MALT
+//   netContents      — presence only (expected value stored but not compared)
+//   governmentWarning — verbatim statutory text match + ALL CAPS prefix + location
+//   bottlerProducer  — presence only
+//   countryOfOrigin  — presence only; null result when product is domestic + no value extracted
+//   sameFieldOfVision — SPIRITS ONLY (null for WINE/MALT); requires brand+class+ABV on one panel
+//   labelLanguage    — mandatory fields must be in English (27 CFR 7.55)
+//   prohibitedSurface — mandatory info must not appear ONLY on bottom/cap/foil (27 CFR 7.61)
 export function runComplianceChecks(
   extraction: ClaudeExtractionResult,
   expectedValues: {
@@ -314,6 +423,8 @@ export function runComplianceChecks(
     expectedValues.classType ?? null,
     classStatus,
     extraction.classType.confidence,
+    // Redundancy note: "Low confidence extraction" is also used verbatim for netContents below.
+    // Extracted into a local string if a third field needs it; left inline for now (only 2 uses).
     classStatus === "FAIL" ? "Class/Type designation not found on label" : classStatus === "NEEDS_REVIEW" ? "Low confidence extraction" : null,
     true,
   );
@@ -376,6 +487,9 @@ export function runComplianceChecks(
     true,
   );
 
+  // Country of origin is only relevant for imported products.
+  // Result is null (omitted from output) when the product is domestic AND Claude found no value.
+  // isMandatory is set to true for non-domestic products, false/null for domestic.
   let countryOfOriginField: FieldResult | null = null;
   if (!extraction.countryOfOrigin.isDomestic || extraction.countryOfOrigin.value) {
     const countryStatus: MatchStatus =
@@ -392,6 +506,14 @@ export function runComplianceChecks(
     );
   }
 
+  // Same-field-of-vision check — SPIRITS ONLY (27 CFR 5.64).
+  // Wine and malt beverages do not have a same-panel requirement; result is null for them.
+  //
+  // Two-tier flagging with a stricter confidence threshold (0.75 vs the global 0.6):
+  //   - Non-compliant AND confidence ≥ 0.75 → ERROR (high confidence failure)
+  //   - Non-compliant OR confidence < 0.75   → WARNING (uncertain; agent should verify)
+  //     This includes the "passed but low confidence" case — passing with <0.75 confidence
+  //     still warrants review because a single image cannot show all label panels.
   let sameFieldOfVisionResult: SameFieldOfVisionResult | null = null;
   if (extraction.beverageType === "SPIRITS" && extraction.sameFieldOfVision) {
     const sfov = extraction.sameFieldOfVision;
@@ -420,6 +542,8 @@ export function runComplianceChecks(
     }
   }
 
+  // Label language: all mandatory fields must appear in English (27 CFR 7.55 / 4.38 / 5.36).
+  // Additional languages alongside English are permitted but do not satisfy the requirement alone.
   const langStatus: MatchStatus =
     !extraction.labelLanguage.mandatoryFieldsInEnglish
       ? "FAIL"
@@ -442,6 +566,11 @@ export function runComplianceChecks(
     true,
   );
 
+  // Prohibited surface check (27 CFR 7.61 / 4.38 / 5.38).
+  // IMPORTANT: This checks whether mandatory information appears ONLY on a prohibited surface
+  // (bottom of container, cap/cork/closure, foil/heat-shrink capsule).
+  // This is NOT a check for prohibited imagery or prohibited statements — those are separate
+  // regulatory concerns addressed in 27 CFR 5.65 / 4.64 / 7.54.
   const prohibitedStatus: MatchStatus = extraction.prohibitedSurface.found
     ? "FAIL"
     : extraction.prohibitedSurface.confidence < CONFIDENCE_THRESHOLD
@@ -463,6 +592,8 @@ export function runComplianceChecks(
     null,
   );
 
+  // Overall status is determined by the worst outcome across all fields and flags.
+  // FAIL takes priority over REVIEW; a single ERROR flag → FAIL regardless of other fields.
   const hasErrors = allFlags.some((f) => f.severity === "ERROR");
   const hasReview =
     allFlags.some((f) => f.severity === "WARNING") ||

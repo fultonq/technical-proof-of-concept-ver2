@@ -1,6 +1,21 @@
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import type { ClaudeExtractionResult } from "./label-types.js";
 
+// System prompt that instructs Claude to extract TTB label fields and return them as
+// a single JSON object with a fixed schema.
+//
+// Design notes:
+//   - The prompt requests VERBATIM extraction. Claude must NOT paraphrase or correct
+//     the label text. Corrections and normalisation happen in compliance-engine.ts.
+//   - "GOVERNMENT WARNING:" capitalisation is explicitly called out because it is a
+//     distinct compliance check — the prefix must be ALL CAPS per 27 CFR 16.21.
+//   - sameFieldOfVision is requested only for SPIRITS. Claude is instructed to return
+//     null for WINE and MALT because the same-panel requirement (27 CFR 5.64) does not
+//     apply to those beverage types.
+//   - Confidence scores < 0.6 signal fields that are occluded, blurry, or ambiguous.
+//     The compliance engine maps low-confidence fields to NEEDS_REVIEW rather than FAIL.
+//   - Max tokens is set to 8192 to accommodate verbose government warning text and long
+//     bottler addresses. The typical response is ~600-900 tokens.
 const EXTRACTION_PROMPT = `You are a TTB (Alcohol and Tobacco Tax and Trade Bureau) label compliance AI assistant. Analyze the provided alcohol beverage label image and extract all mandatory TTB labeling fields with high precision.
 
 Return ONLY a valid JSON object (no markdown, no code blocks, just raw JSON) with the following exact structure:
@@ -68,12 +83,26 @@ IMPORTANT INSTRUCTIONS:
 6. For sameFieldOfVision: only include this field for distilled spirits (beverageType = SPIRITS); set to null for WINE and MALT
 7. Respond with ONLY the JSON object — no additional text, explanation, or formatting`;
 
+// Sends the label image to Claude Vision and parses the structured extraction response.
+//
+// Edge cases:
+//   - Claude occasionally wraps its JSON in markdown code fences despite instruction 7.
+//     The regex /\{[\s\S]*\}/ extracts the first JSON object from the response as a
+//     safety net, so markdown wrapping does not cause a parse failure.
+//   - mimeType is cast to the Anthropic SDK's union type. Upstream validation (multer in
+//     labels.ts) already restricts uploads to image/jpeg, image/png, and image/webp, so
+//     the cast is safe. If that validation is ever relaxed, this cast must be updated too.
+//   - The parsed result is returned as-is without schema validation. If Claude omits a
+//     field or returns an unexpected type, downstream code in compliance-engine.ts will
+//     encounter null/undefined values and should handle them gracefully (most do via
+//     optional-chaining or null-checks).
 export async function extractLabelFields(
   imageBuffer: Buffer,
   mimeType: string,
 ): Promise<ClaudeExtractionResult> {
   const base64Image = imageBuffer.toString("base64");
 
+  // Safe cast: mimeType is pre-validated by multer to be one of these three values.
   const mediaType = mimeType as "image/jpeg" | "image/png" | "image/webp";
 
   const message = await anthropic.messages.create({
@@ -105,6 +134,7 @@ export async function extractLabelFields(
     throw new Error("Claude returned no text content");
   }
 
+  // Strip any markdown fencing Claude may have added despite instructions.
   let jsonText = textContent.text.trim();
   const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
   if (jsonMatch) {

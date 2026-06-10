@@ -12,6 +12,22 @@ export interface AnalyzeOptions {
   expectedNetContents?: string | null;
 }
 
+// Orchestrates a single label analysis: AI extraction → compliance checks → session storage.
+//
+// Expected value fields are all optional:
+//   - expectedBrandName    — fuzzy-matched against the extracted brand name
+//   - expectedClassType    — stored on the result for UI display; NOT compared against label text
+//   - expectedAlcoholContent — loose string match (case-insensitive, whitespace-stripped)
+//   - expectedNetContents  — stored on the result for UI display; NOT compared against label text
+//
+// If extraction fails (Claude API error, malformed JSON response, etc.), a fallback result
+// is returned with every field set to NEEDS_REVIEW and a single ERROR flag. The fallback
+// ensures the session still receives an entry and the UI can show a meaningful error state
+// rather than crashing.
+//
+// MAINTENANCE NOTE: The fallback result object below is a manual replica of the full
+// LabelAnalysisResult shape. If a new required field is added to LabelAnalysisResult,
+// the fallback must be updated here too — TypeScript will catch it at compile time.
 export async function analyzeLabel(
   fileBuffer: Buffer,
   fileName: string,
@@ -85,6 +101,8 @@ export async function analyzeLabel(
   return result;
 }
 
+// Aggregates per-label results for a session into a summary suitable for the results page.
+// passCount + failCount + reviewCount always equals totalCount.
 export function buildBatchSummary(
   sessionId: string,
   results: LabelAnalysisResult[],
