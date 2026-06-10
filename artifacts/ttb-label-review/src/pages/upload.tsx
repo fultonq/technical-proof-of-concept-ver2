@@ -181,10 +181,16 @@ export default function UploadPage() {
   const [csvSessionId] = useState(() => crypto.randomUUID());
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const csvFileRef = useRef<HTMLInputElement>(null);
-  // Cancel ref — set to true mid-loop to stop after the current row completes.
+  // Abort controller for the currently in-flight fetch — aborted immediately on Stop.
+  const abortControllerRef = useRef<AbortController | null>(null);
+  // Fallback cancel flag checked between rows (in case abort isn't enough).
   const cancelRef = useRef(false);
   // How many rows to process per "Generate" click. null = process all pending.
   const [batchSize, setBatchSize] = useState<number | null>(5);
+  // Live progress within the current batch: current index (1-based) + total + phase.
+  const [processingProgress, setProcessingProgress] = useState<{
+    current: number; total: number; phase: "generating" | "checking";
+  } | null>(null);
 
   // ── Single upload ───────────────────────────────────────────────────────
   const uploadSingle = async () => {
@@ -311,14 +317,20 @@ export default function UploadPage() {
     const pending = limit !== null ? allPending.slice(0, limit) : allPending;
     if (!pending.length) return;
 
+    // Fresh abort controller for this batch run — Stop clicks abort() it immediately.
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     cancelRef.current = false;
     setIsCsvProcessing(true);
 
-    for (const row of pending) {
-      // Honour a stop request between rows
+    for (let i = 0; i < pending.length; i++) {
+      const row = pending[i];
+
+      // Honour a stop request signalled between rows
       if (cancelRef.current) break;
 
       // Step 1 — generate SVG label image
+      setProcessingProgress({ current: i + 1, total: pending.length, phase: "generating" });
       setCsvRows(prev => prev.map(r => r.rowId === row.rowId ? { ...r, status: "generating" } : r));
       let svg: string;
       try {
@@ -327,23 +339,30 @@ export default function UploadPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ labelText }),
+          signal: controller.signal,
         });
         if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any).error || "Image generation failed"); }
         const data = await res.json();
         svg = data.svg as string;
         setCsvRows(prev => prev.map(r => r.rowId === row.rowId ? { ...r, svgPreview: svg } : r));
       } catch (err: any) {
+        // AbortError means the user hit Stop — reset row to pending so it can be retried.
+        if (err.name === "AbortError") {
+          setCsvRows(prev => prev.map(r => r.rowId === row.rowId ? { ...r, status: "pending" } : r));
+          break;
+        }
         setCsvRows(prev => prev.map(r => r.rowId === row.rowId ? { ...r, status: "error", error: `Image generation: ${err.message}` } : r));
         continue;
       }
 
-      // Honour stop after image generation completes (natural break point)
+      // Check cancel again after the slow generation step
       if (cancelRef.current) {
         setCsvRows(prev => prev.map(r => r.rowId === row.rowId ? { ...r, status: "pending", svgPreview: undefined } : r));
         break;
       }
 
       // Step 2 — convert SVG → PNG then run compliance
+      setProcessingProgress({ current: i + 1, total: pending.length, phase: "checking" });
       setCsvRows(prev => prev.map(r => r.rowId === row.rowId ? { ...r, status: "checking" } : r));
       try {
         const blob = await svgToBlob(svg);
@@ -355,16 +374,26 @@ export default function UploadPage() {
         // to guess from the generated image (fixes all-fail issue with CSV imports).
         const apiType = mapCsvBeverageType(row.beverageType);
         if (apiType) formData.append("expectedBeverageType", apiType);
-        const res = await fetch("/api/v1/labels/upload", { method: "POST", body: formData });
+        const res = await fetch("/api/v1/labels/upload", {
+          method: "POST",
+          body: formData,
+          signal: controller.signal,
+        });
         if (!res.ok) throw new Error("Compliance check failed");
         const result: LabelAnalysisResult = await res.json();
         setCsvRows(prev => prev.map(r => r.rowId === row.rowId ? { ...r, status: "complete", result } : r));
       } catch (err: any) {
+        if (err.name === "AbortError") {
+          setCsvRows(prev => prev.map(r => r.rowId === row.rowId ? { ...r, status: "pending", svgPreview: undefined } : r));
+          break;
+        }
         setCsvRows(prev => prev.map(r => r.rowId === row.rowId ? { ...r, status: "error", error: `Compliance check: ${err.message}` } : r));
       }
     }
 
+    abortControllerRef.current = null;
     cancelRef.current = false;
+    setProcessingProgress(null);
     setIsCsvProcessing(false);
   };
 
@@ -677,9 +706,13 @@ export default function UploadPage() {
                   <p className="text-lg font-bold text-foreground">
                     {csvFileName} — {csvRows.length} application{csvRows.length !== 1 ? "s" : ""}
                   </p>
-                  {isCsvProcessing && (
+                  {isCsvProcessing && processingProgress && (
                     <p className="text-sm text-muted-foreground mt-0.5">
-                      Processing… {csvCompleteCount + csvErrorCount} of {csvRows.length} done
+                      {processingProgress.phase === "generating" ? "Generating image" : "Checking compliance"}{" "}
+                      <span className="font-bold text-foreground">
+                        {processingProgress.current} of {processingProgress.total}
+                      </span>
+                      …
                     </p>
                   )}
                   {allCsvDone && (
@@ -819,22 +852,33 @@ export default function UploadPage() {
               {/* ── Actions ─────────────────────────────────────────────── */}
               <div className="space-y-3 pt-2">
 
-                {/* While processing: progress text + Stop button */}
+                {/* While processing: live progress + immediate Stop */}
                 {isCsvProcessing && (
                   <div className="flex items-center justify-between gap-4 flex-wrap">
                     <div className="flex items-center gap-2.5 text-muted-foreground">
                       <Loader2 className="w-5 h-5 animate-spin shrink-0" />
                       <span className="text-sm font-semibold">
-                        Processing… {csvCompleteCount + csvErrorCount} of {csvRows.length} done
+                        {processingProgress ? (
+                          <>
+                            {processingProgress.phase === "generating" ? "Generating image" : "Checking compliance"}{" "}
+                            <span className="text-foreground font-black">
+                              {processingProgress.current} of {processingProgress.total}
+                            </span>
+                            …
+                          </>
+                        ) : "Starting…"}
                       </span>
                     </div>
                     <Button
                       size="lg"
                       variant="outline"
                       className="border-fail/60 text-fail hover:bg-fail/5 font-bold"
-                      onClick={() => { cancelRef.current = true; }}
+                      onClick={() => {
+                        cancelRef.current = true;
+                        abortControllerRef.current?.abort();
+                      }}
                     >
-                      <StopCircle className="w-5 h-5 mr-2" /> Stop after this label
+                      <StopCircle className="w-5 h-5 mr-2" /> Stop
                     </Button>
                   </div>
                 )}
