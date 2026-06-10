@@ -1,24 +1,22 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useLocation } from "wouter";
 import {
   UploadCloud, FileImage, Layers, Loader2, X, Plus, AlertCircle, Tag,
   CheckCircle, Wand2, FileText, RefreshCw, FlipHorizontal, TableProperties,
   CheckCircle2, XCircle, Clock, ChevronDown, ChevronUp, StopCircle,
-  Download, Printer, ExternalLink, FileBarChart2, ClipboardList,
+  Download, Printer, ExternalLink, FolderOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { LabelAnalysisResult } from "@workspace/api-client-react";
 import { parseLabelCSV, rowToLabelText, type CsvLabelRow } from "@/lib/csv-label";
 import { exportSessionToCSV } from "@/lib/csv-export";
 import { generatePrintReport } from "@/lib/print-report";
+import { saveSession } from "@/lib/session-history";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -351,6 +349,7 @@ export default function UploadPage() {
       const res = await fetch("/api/v1/labels/upload", { method: "POST", body: formData });
       if (!res.ok) throw new Error("Upload failed — please try again.");
       const data: LabelAnalysisResult = await res.json();
+      saveSession({ sessionId: data.sessionId, type: "single", labelCount: 1, fileName: singleFile.name });
       setLocation(`/results/${data.sessionId}`);
     } catch (err: any) {
       toast({ title: "Something went wrong", description: err.message, variant: "destructive" });
@@ -381,7 +380,11 @@ export default function UploadPage() {
       }
     }
     setIsUploading(false);
-    if (currentSessionId) setLocation(`/results/${currentSessionId}`);
+    if (currentSessionId) {
+      const completedCount = batchQueue.filter(f => f.status === "complete").length + 1;
+      saveSession({ sessionId: currentSessionId, type: "batch", labelCount: completedCount });
+      setLocation(`/results/${currentSessionId}`);
+    }
   };
 
   // ── Generate mode ───────────────────────────────────────────────────────
@@ -424,6 +427,7 @@ export default function UploadPage() {
       const res = await fetch("/api/v1/labels/upload", { method: "POST", body: formData });
       if (!res.ok) throw new Error("Compliance check failed.");
       const data: LabelAnalysisResult = await res.json();
+      saveSession({ sessionId: data.sessionId, type: "generate", labelCount: 1 });
       setLocation(`/results/${data.sessionId}`);
     } catch (err: any) {
       toast({ title: "Something went wrong", description: err.message, variant: "destructive" });
@@ -560,28 +564,17 @@ export default function UploadPage() {
     "Wine": "Wine",
   };
 
-  // ── Derived: reportable results from all modes (used by Report + Review buttons) ──
-  const reportableResults: LabelAnalysisResult[] = [
-    ...csvRows.filter(r => r.status === "complete" && r.result).map(r => r.result!),
-    ...batchQueue.filter(q => q.status === "complete" && q.result).map(q => q.result!),
-  ];
-  const activeReviewSessionId: string | null =
-    csvRows.some(r => r.status === "complete" && r.result) ? csvSessionId :
-    batchSessionId ?? null;
-
-  const handlePrintReport = (results: LabelAnalysisResult[], sessionId: string) => {
-    const sessionData = {
-      sessionId,
-      totalCount:  results.length,
-      passCount:   results.filter(r => r.overallStatus === "PASS").length,
-      failCount:   results.filter(r => r.overallStatus === "FAIL").length,
-      reviewCount: results.filter(r => r.overallStatus === "REVIEW").length,
-      results,
-    };
-    const html = generatePrintReport(sessionData, {}, sessionId, {});
-    const win = window.open("", "_blank");
-    if (win) { win.document.write(html); win.document.close(); win.print(); }
-  };
+  // ── Save CSV session to history when the batch fully completes ───────────
+  useEffect(() => {
+    if (allCsvDone && csvCompleteCount > 0) {
+      saveSession({
+        sessionId: csvSessionId,
+        type: "csv",
+        labelCount: csvCompleteCount,
+        fileName: csvFileName ?? undefined,
+      });
+    }
+  }, [allCsvDone, csvCompleteCount, csvSessionId, csvFileName]);
 
   return (
     <div className="flex-1 p-6 md:p-12 max-w-3xl mx-auto w-full">
@@ -623,42 +616,14 @@ export default function UploadPage() {
         {/* Divider */}
         <div className="h-8 w-px bg-border hidden sm:block" />
 
-        {/* Report dropdown — enabled when there are processed results */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="outline"
-              disabled={reportableResults.length === 0}
-              className="flex items-center gap-2 px-4 py-2.5 text-base font-semibold"
-            >
-              <FileBarChart2 className="w-5 h-5" />
-              Report
-              <ChevronDown className="w-4 h-4 ml-0.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-52">
-            <DropdownMenuItem
-              onClick={() => exportSessionToCSV(reportableResults, `ttb-report-${(activeReviewSessionId ?? csvSessionId).slice(0, 8)}.csv`)}
-            >
-              <Download className="w-4 h-4 mr-2" /> Download CSV
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => handlePrintReport(reportableResults, activeReviewSessionId ?? csvSessionId)}
-            >
-              <Printer className="w-4 h-4 mr-2" /> Print Report
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {/* Review Processed Labels — navigates to the most recent session's results page */}
+        {/* Manage Labels — always enabled, navigates to the dedicated management page */}
         <Button
           variant="outline"
-          disabled={!activeReviewSessionId}
-          onClick={() => activeReviewSessionId && setLocation(`/results/${activeReviewSessionId}`)}
+          onClick={() => setLocation("/manage")}
           className="flex items-center gap-2 px-4 py-2.5 text-base font-semibold"
         >
-          <ClipboardList className="w-5 h-5" />
-          Review Processed Labels
+          <FolderOpen className="w-5 h-5" />
+          Manage Labels
         </Button>
       </div>
 

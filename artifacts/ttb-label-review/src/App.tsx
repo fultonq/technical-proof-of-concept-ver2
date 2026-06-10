@@ -6,6 +6,7 @@ import NotFound from "@/pages/not-found";
 import UploadPage from "@/pages/upload";
 import ResultsPage from "@/pages/results";
 import LabelDetailPage from "@/pages/label-detail";
+import ManagePage from "@/pages/manage";
 
 const queryClient = new QueryClient();
 
@@ -28,6 +29,7 @@ function Router() {
       <main className="flex-1 flex flex-col bg-background relative z-0">
         <Switch>
           <Route path="/" component={UploadPage} />
+          <Route path="/manage" component={ManagePage} />
           <Route path="/results/:sessionId" component={ResultsPage} />
           <Route path="/results/:sessionId/:labelId" component={LabelDetailPage} />
           <Route component={NotFound} />
