@@ -35,6 +35,8 @@ export default function LabelDetailPage() {
     query: { enabled: !!labelId, queryKey: getGetLabelResultQueryKey(labelId) }
   });
 
+  const [expandedCorrection, setExpandedCorrection] = useState<string | null>(null);
+
   if (isLoading) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-12 gap-4">
@@ -58,8 +60,6 @@ export default function LabelDetailPage() {
       </div>
     );
   }
-
-  const [expandedCorrection, setExpandedCorrection] = useState<string | null>(null);
 
   const status = result.overallStatus;
   const flagCount = result.flags.filter(f => f.severity === "ERROR").length;
