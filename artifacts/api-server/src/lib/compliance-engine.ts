@@ -40,7 +40,10 @@ function normalizeBrandName(s: string): string {
     .toLowerCase()
     .trim()
     .normalize("NFC")
-    .replace(/[\u2019\u2018\u201b]/g, "'")
+    // Normalize every apostrophe/quote variant to a straight apostrophe:
+    // curly singles (U+2018/2019/201B), modifier letter (U+02BC),
+    // prime (U+2032), grave (U+0060), backtick variants, half-width forms
+    .replace(/[\u2018\u2019\u201b\u02bc\u2032\u0060\uff07\u02b9\u02bb]/g, "'")
     .replace(/[^a-z0-9\s']/g, " ")
     .replace(/\s+/g, " ")
     .trim();
