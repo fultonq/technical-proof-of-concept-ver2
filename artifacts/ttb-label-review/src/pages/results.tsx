@@ -2,10 +2,13 @@ import React from "react";
 import { useRoute, Link } from "wouter";
 import { useGetSessionResults, getGetSessionResultsQueryKey } from "@workspace/api-client-react";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { ConfidenceBar } from "@/components/ui/confidence-bar";
 import { Button } from "@/components/ui/button";
 import { exportSessionToCSV } from "@/lib/csv-export";
-import { ArrowLeft, Download, Plus, Search, Loader2, AlertCircle, CheckCircle2, XCircle, Clock } from "lucide-react";
+import { generatePrintReport } from "@/lib/print-report";
+import {
+  ArrowLeft, Download, Plus, Search, Loader2, AlertCircle,
+  CheckCircle2, XCircle, Clock, MessageSquare, Printer,
+} from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
@@ -14,10 +17,42 @@ export default function ResultsPage() {
   const sessionId = params?.sessionId || "";
 
   const { data: sessionData, isLoading, isError, error } = useGetSessionResults(sessionId, {
-    query: { enabled: !!sessionId, queryKey: getGetSessionResultsQueryKey(sessionId) }
+    query: { enabled: !!sessionId, queryKey: getGetSessionResultsQueryKey(sessionId) },
   });
 
   const [searchTerm, setSearchTerm] = React.useState("");
+
+  // ── Per-label reviewer comments, persisted to localStorage ────────────────
+  const [comments, setComments] = React.useState<Record<string, string>>(() => {
+    try {
+      const stored = localStorage.getItem(`ttb-comments-${sessionId}`);
+      return stored ? (JSON.parse(stored) as Record<string, string>) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [openCommentId, setOpenCommentId] = React.useState<string | null>(null);
+
+  const updateComment = (labelId: string, text: string) => {
+    const next = { ...comments, [labelId]: text };
+    setComments(next);
+    try {
+      localStorage.setItem(`ttb-comments-${sessionId}`, JSON.stringify(next));
+    } catch { /* ignore quota errors */ }
+  };
+
+  // ── Print report ───────────────────────────────────────────────────────────
+  const printReport = () => {
+    if (!sessionData) return;
+    const html = generatePrintReport(sessionData, comments, sessionId);
+    const win = window.open("", "_blank");
+    if (!win) {
+      alert("Pop-up blocked — please allow pop-ups for this site and try again.");
+      return;
+    }
+    win.document.write(html);
+    win.document.close();
+  };
 
   if (isLoading) {
     return (
@@ -35,22 +70,29 @@ export default function ResultsPage() {
         <Alert variant="destructive" className="text-base">
           <AlertCircle className="h-5 w-5" />
           <AlertTitle className="text-lg font-bold">Could not load results</AlertTitle>
-          <AlertDescription>{(error as any)?.message || "Something went wrong. Please go back and try again."}</AlertDescription>
+          <AlertDescription>
+            {(error as any)?.message || "Something went wrong. Please go back and try again."}
+          </AlertDescription>
         </Alert>
-        <Link href="/"><Button size="lg" variant="outline" className="text-base"><ArrowLeft className="w-5 h-5 mr-2" /> Go Back</Button></Link>
+        <Link href="/">
+          <Button size="lg" variant="outline" className="text-base">
+            <ArrowLeft className="w-5 h-5 mr-2" /> Go Back
+          </Button>
+        </Link>
       </div>
     );
   }
 
-  const filteredResults = sessionData.results.filter(r =>
-    r.fileName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    r.brandName.extractedValue?.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredResults = sessionData.results.filter(
+    (r) =>
+      r.fileName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.brandName.extractedValue?.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
   return (
     <div className="flex-1 flex flex-col">
 
-      {/* Summary bar */}
+      {/* ── Summary bar ─────────────────────────────────────────────────── */}
       <div className="bg-card border-b border-border shadow-sm">
         <div className="max-w-6xl mx-auto w-full p-6">
 
@@ -64,14 +106,24 @@ export default function ResultsPage() {
                 {sessionData.totalCount} label{sessionData.totalCount !== 1 ? "s" : ""} checked in this session
               </p>
             </div>
-            <Button
-              size="lg"
-              variant="outline"
-              className="text-base font-semibold"
-              onClick={() => exportSessionToCSV(sessionData.results, `ttb-report-${sessionId}.csv`)}
-            >
-              <Download className="w-5 h-5 mr-2" /> Download Report (CSV)
-            </Button>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                size="lg"
+                variant="outline"
+                className="text-base font-semibold"
+                onClick={() => exportSessionToCSV(sessionData.results, `ttb-report-${sessionId}.csv`)}
+              >
+                <Download className="w-5 h-5 mr-2" /> Download CSV
+              </Button>
+              <Button
+                size="lg"
+                className="text-base font-semibold"
+                onClick={printReport}
+              >
+                <Printer className="w-5 h-5 mr-2" /> Print Report
+              </Button>
+            </div>
           </div>
 
           {/* Big summary cards */}
@@ -95,11 +147,16 @@ export default function ResultsPage() {
         </div>
       </div>
 
-      {/* Table */}
+      {/* ── Label table ─────────────────────────────────────────────────── */}
       <div className="flex-1 p-6 max-w-6xl mx-auto w-full">
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
-          <h3 className="text-xl font-bold text-foreground">All Labels</h3>
+          <div>
+            <h3 className="text-xl font-bold text-foreground">All Labels</h3>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Click <MessageSquare className="inline w-3.5 h-3.5" /> to add a reviewer note — notes are saved automatically and included in the printed report.
+            </p>
+          </div>
           <div className="relative w-full sm:w-72">
             <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -119,7 +176,7 @@ export default function ResultsPage() {
                 <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">Brand Found</th>
                 <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">Result</th>
                 <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">Issues</th>
-                <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground text-right">Action</th>
+                <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -130,48 +187,116 @@ export default function ResultsPage() {
                   </td>
                 </tr>
               ) : (
-                filteredResults.map((result) => (
-                  <tr key={result.labelId} className="hover:bg-secondary/20 transition-colors">
-                    <td className="px-5 py-4 font-medium text-base text-foreground max-w-[220px] truncate" title={result.fileName}>
-                      {result.fileName}
-                    </td>
-                    <td className="px-5 py-4 text-base text-foreground">
-                      {result.brandName.extractedValue
-                        ? <span className="font-mono">{result.brandName.extractedValue}</span>
-                        : <span className="text-muted-foreground italic">Not detected</span>}
-                    </td>
-                    <td className="px-5 py-4">
-                      <StatusBadge status={result.overallStatus} className="text-sm px-3 py-1" />
-                    </td>
-                    <td className="px-5 py-4 text-base">
-                      {result.flags.length > 0
-                        ? <span className="inline-flex items-center gap-1.5 text-fail font-bold">
-                            <AlertCircle className="w-4 h-4" /> {result.flags.length} issue{result.flags.length !== 1 ? "s" : ""}
-                          </span>
-                        : <span className="text-pass font-semibold flex items-center gap-1.5">
-                            <CheckCircle2 className="w-4 h-4" /> None
-                          </span>}
-                    </td>
-                    <td className="px-5 py-4 text-right">
-                      <Link href={`/results/${sessionId}/${result.labelId}`}>
-                        <Button size="lg" className="text-base font-bold px-6">
-                          See Report
-                        </Button>
-                      </Link>
-                    </td>
-                  </tr>
-                ))
+                filteredResults.map((result) => {
+                  const hasComment = !!comments[result.labelId]?.trim();
+                  const isCommentOpen = openCommentId === result.labelId;
+
+                  return (
+                    <React.Fragment key={result.labelId}>
+                      <tr className="hover:bg-secondary/20 transition-colors">
+                        <td className="px-5 py-4 font-medium text-base text-foreground max-w-[220px] truncate" title={result.fileName}>
+                          {result.fileName}
+                        </td>
+                        <td className="px-5 py-4 text-base text-foreground">
+                          {result.brandName.extractedValue
+                            ? <span className="font-mono">{result.brandName.extractedValue}</span>
+                            : <span className="text-muted-foreground italic">Not detected</span>}
+                        </td>
+                        <td className="px-5 py-4">
+                          <StatusBadge status={result.overallStatus} className="text-sm px-3 py-1" />
+                        </td>
+                        <td className="px-5 py-4 text-base">
+                          {result.flags.length > 0
+                            ? <span className="inline-flex items-center gap-1.5 text-fail font-bold">
+                                <AlertCircle className="w-4 h-4" /> {result.flags.length} issue{result.flags.length !== 1 ? "s" : ""}
+                              </span>
+                            : <span className="text-pass font-semibold flex items-center gap-1.5">
+                                <CheckCircle2 className="w-4 h-4" /> None
+                              </span>}
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="flex items-center justify-end gap-2">
+                            {/* Comment toggle button */}
+                            <button
+                              onClick={() => setOpenCommentId(isCommentOpen ? null : result.labelId)}
+                              title={hasComment ? "Edit reviewer comment" : "Add reviewer comment"}
+                              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-semibold transition-all ${
+                                hasComment
+                                  ? "border-primary/40 bg-primary/5 text-primary hover:bg-primary/10"
+                                  : isCommentOpen
+                                    ? "border-primary bg-primary/10 text-primary"
+                                    : "border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                              }`}
+                            >
+                              <MessageSquare className="w-4 h-4" />
+                              {hasComment ? "Note" : "Add note"}
+                            </button>
+                            <Link href={`/results/${sessionId}/${result.labelId}`}>
+                              <Button size="lg" className="text-base font-bold px-6">
+                                See Report
+                              </Button>
+                            </Link>
+                          </div>
+                        </td>
+                      </tr>
+
+                      {/* Expandable comment row */}
+                      {isCommentOpen && (
+                        <tr>
+                          <td colSpan={5} className="px-5 py-4 bg-secondary/10 border-b border-primary/10">
+                            <div className="flex items-start gap-3 max-w-2xl">
+                              <MessageSquare className="w-4 h-4 text-primary mt-2.5 shrink-0" />
+                              <div className="flex-1">
+                                <p className="text-sm font-semibold text-foreground mb-1">
+                                  Reviewer Note
+                                  <span className="ml-2 text-xs font-normal text-muted-foreground">
+                                    Included in printed report
+                                  </span>
+                                </p>
+                                <textarea
+                                  rows={3}
+                                  autoFocus
+                                  placeholder={
+                                    result.overallStatus === "PASS"
+                                      ? "e.g. Approved — label conforms to all mandatory requirements."
+                                      : result.overallStatus === "FAIL"
+                                        ? "e.g. Rejected — missing government warning. Returned to applicant for correction."
+                                        : "e.g. Flagged for secondary review — ABV confidence low, physical label inspection required."
+                                  }
+                                  value={comments[result.labelId] ?? ""}
+                                  onChange={(e) => updateComment(result.labelId, e.target.value)}
+                                  className="w-full text-sm rounded-lg border border-border bg-background px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-ring"
+                                />
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Saved automatically · {(comments[result.labelId] ?? "").length} character{(comments[result.labelId] ?? "").length !== 1 ? "s" : ""}
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
 
-        <div className="mt-6 flex justify-center">
+        <div className="mt-6 flex items-center justify-between">
           <Link href="/">
             <Button size="lg" variant="outline" className="text-base font-semibold px-8">
               <Plus className="w-5 h-5 mr-2" /> Check Another Label
             </Button>
           </Link>
+          <Button
+            size="lg"
+            variant="outline"
+            className="text-base font-semibold"
+            onClick={printReport}
+          >
+            <Printer className="w-5 h-5 mr-2" /> Print Report
+          </Button>
         </div>
       </div>
     </div>
