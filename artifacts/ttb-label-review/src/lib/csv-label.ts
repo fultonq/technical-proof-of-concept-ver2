@@ -111,15 +111,19 @@ const GOV_WARNING =
   "(2) Consumption of alcoholic beverages impairs your ability to drive a car or " +
   "operate machinery, and may cause health problems.";
 
-// Convert a parsed CSV row into the natural-language label description text sent to the
-// generate-preview API. Claude's label-generator uses this text to produce a realistic SVG label.
+// Convert a parsed CSV row into natural-language label copy sent to the generate-preview API.
 //
-// Design rules:
-//  - Only include fields that have values — Claude infers missing fields are absent.
-//  - Always include the Government Warning; it is mandatory on every label.
-//  - Beverage type is stated explicitly so Claude picks the right visual style.
-//  - Wine labels include appellation and sulfite declaration prominently.
-//  - Imported product section appears only when is_imported = true.
+// Format philosophy — mirrors how a real label reads, NOT a structured form:
+//   • Brand name is the first/most prominent line (no "BRAND NAME:" prefix)
+//   • Class/type designation directly below the brand
+//   • ABV and net contents as they appear on the physical label
+//   • Bottler/producer line in standard TTB format
+//   • Wine-specific fields (appellation, sulfite) appear naturally
+//   • Government Warning at the bottom, verbatim
+//
+// This "label-like" format causes Claude's SVG generator to produce a realistic
+// label image where each field occupies its proper visual position, which in turn
+// makes Claude Vision extraction more reliable during compliance checking.
 export function rowToLabelText(row: CsvLabelRow): string {
   const isWine = row.beverageType.toLowerCase().includes("wine");
   const isSpirits =
@@ -131,44 +135,46 @@ export function rowToLabelText(row: CsvLabelRow): string {
     row.beverageType.toLowerCase().includes("ale") ||
     row.beverageType.toLowerCase().includes("lager");
 
-  const typeLabel = isWine ? "Wine" : isSpirits ? "Distilled Spirits" : isMalt ? "Beer/Malt Beverage" : row.beverageType || "Alcohol Beverage";
+  const lines: string[] = [];
 
-  const lines: string[] = [
-    `TTB LABEL APPLICATION — ${typeLabel.toUpperCase()}`,
-    "",
-    `BRAND NAME: ${row.brandName || "(unknown)"}`,
-    `CLASS/TYPE: ${row.classType || "(not specified)"}`,
-  ];
+  // ── Brand name — most prominent element on the label ────────────────────
+  lines.push(row.brandName || "(Brand Name)");
 
-  if (row.alcoholContent) lines.push(`ALCOHOL CONTENT: ${row.alcoholContent}`);
-  if (row.netContents) lines.push(`NET CONTENTS: ${row.netContents}`);
+  // ── Class / type designation ─────────────────────────────────────────────
+  if (row.classType) lines.push(row.classType);
 
-  const bottlerLine = [row.brandName, row.address].filter(Boolean).join(", ");
-  if (bottlerLine) {
-    const prefix = isWine ? "Bottled by" : isSpirits ? "Bottled by" : "Brewed and Bottled by";
-    lines.push(`${prefix}: ${bottlerLine}`);
+  lines.push("");
+
+  // ── Core mandatory fields ────────────────────────────────────────────────
+  if (row.alcoholContent) lines.push(row.alcoholContent);
+  if (row.netContents)    lines.push(`Net Contents: ${row.netContents}`);
+  if (row.ageStatement)   lines.push(`Aged ${row.ageStatement}`);
+
+  lines.push("");
+
+  // ── Bottler / producer line ──────────────────────────────────────────────
+  const bottlerParts = [row.brandName, row.address].filter(Boolean);
+  if (bottlerParts.length > 0) {
+    const prefix = isMalt ? "Brewed and Bottled by" : "Bottled by";
+    lines.push(`${prefix}: ${bottlerParts.join(", ")}`);
   }
 
-  // Country of origin — always required for wine, required when imported for spirits/malt
+  // ── Country of origin ────────────────────────────────────────────────────
+  // Wine: always required (even domestic). Spirits/Malt: only when imported.
   if (row.isImported && row.countryOfOrigin) {
-    lines.push(`IMPORTED FROM: ${row.countryOfOrigin}`);
+    lines.push(`Imported from ${row.countryOfOrigin}`);
   } else if (isWine) {
-    lines.push(`COUNTRY OF ORIGIN: ${row.countryOfOrigin || "United States"}`);
+    lines.push(`Country of Origin: ${row.countryOfOrigin || "United States"}`);
   }
 
-  // Wine-specific fields
-  if (isWine && row.appellation) {
-    lines.push(`APPELLATION OF ORIGIN: ${row.appellation}`);
-  }
-  if (isWine && row.foreignWinePct) {
-    lines.push(`Contains ${row.foreignWinePct}% wine of foreign origin`);
-  }
+  // ── Wine-specific fields ─────────────────────────────────────────────────
+  if (isWine && row.appellation)    lines.push(`Appellation of Origin: ${row.appellation}`);
+  if (isWine && row.foreignWinePct) lines.push(`Contains ${row.foreignWinePct}% wine of foreign origin`);
 
-  // Optional fields present on many labels
-  if (row.ageStatement) lines.push(`AGE STATEMENT: Aged ${row.ageStatement}`);
-  if (row.colorIngredients) lines.push(`COLORING AGENTS: ${row.colorIngredients}`);
-  if (row.sulfiteAspartame) lines.push(`DECLARATION: ${row.sulfiteAspartame}`);
-  if (row.commodityStatement) lines.push(`COMMODITY STATEMENT: ${row.commodityStatement}`);
+  // ── Optional declarations ────────────────────────────────────────────────
+  if (row.colorIngredients)   lines.push(`Contains: ${row.colorIngredients}`);
+  if (row.sulfiteAspartame)   lines.push(row.sulfiteAspartame);
+  if (row.commodityStatement) lines.push(row.commodityStatement);
 
   lines.push("");
   lines.push(GOV_WARNING);

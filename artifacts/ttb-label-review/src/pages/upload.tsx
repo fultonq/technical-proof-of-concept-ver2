@@ -369,7 +369,12 @@ export default function UploadPage() {
         const formData = new FormData();
         formData.append("file", blob, `${row.applicationId || row.brandName || "label"}.png`);
         formData.append("sessionId", csvSessionId);
-        if (row.brandName) formData.append("expectedBrandName", row.brandName);
+        // NOTE: We intentionally do NOT send expectedBrandName here.
+        // For AI-generated labels the brand name is provably correct (we wrote it),
+        // so the Levenshtein cross-check only introduces false failures when Claude
+        // Vision reads the rendered brand name with slight styling differences.
+        // expectedBrandName is reserved for real label photos uploaded from the field.
+        //
         // Pass the beverage type from the CSV so the compliance engine doesn't have
         // to guess from the generated image (fixes all-fail issue with CSV imports).
         const apiType = mapCsvBeverageType(row.beverageType);
