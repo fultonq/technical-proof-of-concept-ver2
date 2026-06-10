@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import {
   UploadCloud, FileImage, Layers, Loader2, X, Plus, AlertCircle, Tag,
   CheckCircle, Wand2, FileText, RefreshCw, FlipHorizontal, TableProperties,
-  CheckCircle2, XCircle, Clock, ChevronDown, ChevronUp,
+  CheckCircle2, XCircle, Clock, ChevronDown, ChevronUp, StopCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -76,6 +76,16 @@ function RowStatusLabel({ status }: { status: CsvRowState["status"] }) {
   }
   if (status === "error")      return <span className="text-xs text-fail font-semibold">Error</span>;
   return null;
+}
+
+// Maps the human-readable beverage_type column value from the CSV to the
+// internal code the compliance engine expects (SPIRITS / WINE / MALT).
+function mapCsvBeverageType(raw: string): string | undefined {
+  const l = raw.toLowerCase();
+  if (l.includes("wine"))                                            return "WINE";
+  if (l.includes("spirit") || l.includes("distilled"))              return "SPIRITS";
+  if (l.includes("malt") || l.includes("beer") || l.includes("ale") || l.includes("lager")) return "MALT";
+  return undefined;
 }
 
 function OverallBadge({ status }: { status?: string }) {
@@ -171,6 +181,10 @@ export default function UploadPage() {
   const [csvSessionId] = useState(() => crypto.randomUUID());
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const csvFileRef = useRef<HTMLInputElement>(null);
+  // Cancel ref — set to true mid-loop to stop after the current row completes.
+  const cancelRef = useRef(false);
+  // How many rows to process per "Generate" click. null = process all pending.
+  const [batchSize, setBatchSize] = useState<number | null>(5);
 
   // ── Single upload ───────────────────────────────────────────────────────
   const uploadSingle = async () => {
@@ -290,13 +304,20 @@ export default function UploadPage() {
     if (csvFileRef.current) csvFileRef.current.value = "";
   };
 
-  // Process all CSV rows: generate SVG → convert to PNG → compliance check
-  const processCsvRows = async () => {
-    const pending = csvRows.filter(r => r.status === "pending" || r.status === "error");
+  // Process CSV rows sequentially: generate SVG → convert to PNG → compliance check.
+  // limit: max number of pending rows to process in this call (null = all pending).
+  const processCsvRows = async (limit: number | null = null) => {
+    const allPending = csvRows.filter(r => r.status === "pending" || r.status === "error");
+    const pending = limit !== null ? allPending.slice(0, limit) : allPending;
     if (!pending.length) return;
+
+    cancelRef.current = false;
     setIsCsvProcessing(true);
 
     for (const row of pending) {
+      // Honour a stop request between rows
+      if (cancelRef.current) break;
+
       // Step 1 — generate SVG label image
       setCsvRows(prev => prev.map(r => r.rowId === row.rowId ? { ...r, status: "generating" } : r));
       let svg: string;
@@ -316,6 +337,12 @@ export default function UploadPage() {
         continue;
       }
 
+      // Honour stop after image generation completes (natural break point)
+      if (cancelRef.current) {
+        setCsvRows(prev => prev.map(r => r.rowId === row.rowId ? { ...r, status: "pending", svgPreview: undefined } : r));
+        break;
+      }
+
       // Step 2 — convert SVG → PNG then run compliance
       setCsvRows(prev => prev.map(r => r.rowId === row.rowId ? { ...r, status: "checking" } : r));
       try {
@@ -324,6 +351,10 @@ export default function UploadPage() {
         formData.append("file", blob, `${row.applicationId || row.brandName || "label"}.png`);
         formData.append("sessionId", csvSessionId);
         if (row.brandName) formData.append("expectedBrandName", row.brandName);
+        // Pass the beverage type from the CSV so the compliance engine doesn't have
+        // to guess from the generated image (fixes all-fail issue with CSV imports).
+        const apiType = mapCsvBeverageType(row.beverageType);
+        if (apiType) formData.append("expectedBeverageType", apiType);
         const res = await fetch("/api/v1/labels/upload", { method: "POST", body: formData });
         if (!res.ok) throw new Error("Compliance check failed");
         const result: LabelAnalysisResult = await res.json();
@@ -333,6 +364,7 @@ export default function UploadPage() {
       }
     }
 
+    cancelRef.current = false;
     setIsCsvProcessing(false);
   };
 
@@ -784,30 +816,82 @@ export default function UploadPage() {
                 })}
               </div>
 
-              {/* Actions */}
-              <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
-                {allCsvDone ? (
-                  <Button size="lg" onClick={() => setLocation(`/results/${csvSessionId}`)}
-                    className="text-lg px-10 py-4 h-auto font-bold">
-                    View Full Session Report →
-                  </Button>
-                ) : (
-                  <Button size="lg"
-                    disabled={csvPendingCount === 0 || isCsvProcessing}
-                    onClick={processCsvRows}
-                    className="text-lg px-10 py-4 h-auto font-bold">
-                    {isCsvProcessing
-                      ? <><Loader2 className="w-5 h-5 mr-3 animate-spin" /> Processing {csvRows.length} application{csvRows.length !== 1 ? "s" : ""}…</>
-                      : <><Wand2 className="w-5 h-5 mr-3" /> Generate &amp; Check All {csvRows.length} Labels</>}
-                  </Button>
+              {/* ── Actions ─────────────────────────────────────────────── */}
+              <div className="space-y-3 pt-2">
+
+                {/* While processing: progress text + Stop button */}
+                {isCsvProcessing && (
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <div className="flex items-center gap-2.5 text-muted-foreground">
+                      <Loader2 className="w-5 h-5 animate-spin shrink-0" />
+                      <span className="text-sm font-semibold">
+                        Processing… {csvCompleteCount + csvErrorCount} of {csvRows.length} done
+                      </span>
+                    </div>
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      className="border-fail/60 text-fail hover:bg-fail/5 font-bold"
+                      onClick={() => { cancelRef.current = true; }}
+                    >
+                      <StopCircle className="w-5 h-5 mr-2" /> Stop after this label
+                    </Button>
+                  </div>
                 )}
-                {allCsvDone && csvErrorCount > 0 && (
-                  <button onClick={() => setCsvRows(prev => prev.map(r => r.status === "error" ? { ...r, status: "pending", error: undefined } : r))}
-                    disabled={isCsvProcessing}
-                    className="text-sm font-semibold text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors">
-                    <RefreshCw className="w-4 h-4" /> Retry {csvErrorCount} error{csvErrorCount !== 1 ? "s" : ""}
-                  </button>
+
+                {/* View report once all done */}
+                {allCsvDone && !isCsvProcessing && (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button size="lg" onClick={() => setLocation(`/results/${csvSessionId}`)}
+                      className="text-lg px-10 py-4 h-auto font-bold">
+                      View Full Session Report →
+                    </Button>
+                    {csvErrorCount > 0 && (
+                      <button
+                        onClick={() => setCsvRows(prev => prev.map(r => r.status === "error" ? { ...r, status: "pending", error: undefined } : r))}
+                        className="text-sm font-semibold text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors">
+                        <RefreshCw className="w-4 h-4" /> Retry {csvErrorCount} error{csvErrorCount !== 1 ? "s" : ""}
+                      </button>
+                    )}
+                  </div>
                 )}
+
+                {/* Batch size control + Generate button when rows are pending */}
+                {!isCsvProcessing && csvPendingCount > 0 && (
+                  <div className="space-y-3">
+                    {/* Batch size selector */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold text-muted-foreground">Generate:</span>
+                      {([1, 3, 5, 10, null] as (number | null)[]).map((n) => (
+                        <button
+                          key={n ?? "all"}
+                          onClick={() => setBatchSize(n)}
+                          className={`px-3 py-1.5 rounded-lg border text-sm font-bold transition-all ${
+                            batchSize === n
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : "border-border bg-background text-foreground hover:border-primary/50"
+                          }`}
+                        >
+                          {n === null ? "All" : n}
+                        </button>
+                      ))}
+                      <span className="text-sm text-muted-foreground">label{batchSize !== 1 ? "s" : ""} at a time</span>
+                    </div>
+
+                    {/* Generate button */}
+                    <Button
+                      size="lg"
+                      onClick={() => processCsvRows(batchSize)}
+                      className="text-lg px-10 py-4 h-auto font-bold"
+                    >
+                      <Wand2 className="w-5 h-5 mr-3" />
+                      {batchSize === null
+                        ? `Generate & Check All ${csvPendingCount} Remaining`
+                        : `Generate ${Math.min(batchSize, csvPendingCount)} Label${Math.min(batchSize, csvPendingCount) !== 1 ? "s" : ""}`}
+                    </Button>
+                  </div>
+                )}
+
               </div>
             </div>
           )}
