@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "TTB Label Review"
+version = "1.0.0"
+id = "artifacts/ttb-label-review"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 25257
+
+[services.development]
+run = "pnpm --filter @workspace/ttb-label-review run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/ttb-label-review", "run", "build" ]
+publicDir = "artifacts/ttb-label-review/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25257"
+BASE_PATH = "/"

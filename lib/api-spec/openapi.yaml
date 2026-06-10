@@ -3,13 +3,15 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: TTB Label Review PoC API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: labels
+    description: TTB label analysis operations
 paths:
   /healthz:
     get:
@@ -24,6 +26,120 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /v1/labels/upload:
+    post:
+      operationId: uploadLabel
+      tags: [labels]
+      summary: Upload single label image for analysis
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/LabelUploadInput"
+      responses:
+        "200":
+          description: Analysis result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LabelAnalysisResult"
+        "400":
+          description: Invalid file or request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/labels/batch:
+    post:
+      operationId: uploadLabelBatch
+      tags: [labels]
+      summary: Upload up to 50 labels for batch processing
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/LabelBatchInput"
+      responses:
+        "200":
+          description: Batch analysis result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchAnalysisResult"
+        "400":
+          description: Invalid files or request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/labels/session/{sessionId}:
+    get:
+      operationId: getSessionResults
+      tags: [labels]
+      summary: Retrieve all results for a session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchAnalysisResult"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteSession
+      tags: [labels]
+      summary: Purge session data
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Session purged
+
+  /v1/labels/{labelId}:
+    get:
+      operationId: getLabelResult
+      tags: [labels]
+      summary: Retrieve stored analysis result by label ID
+      parameters:
+        - name: labelId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Label analysis result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LabelAnalysisResult"
+        "404":
+          description: Label not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +150,188 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    LabelUploadInput:
+      type: object
+      properties:
+        sessionId:
+          type: ["string", "null"]
+        expectedBrandName:
+          type: ["string", "null"]
+        expectedClassType:
+          type: ["string", "null"]
+        expectedAlcoholContent:
+          type: ["string", "null"]
+        expectedNetContents:
+          type: ["string", "null"]
+
+    LabelBatchInput:
+      type: object
+      properties:
+        sessionId:
+          type: ["string", "null"]
+
+    BeverageType:
+      type: string
+      enum: [SPIRITS, WINE, MALT, UNKNOWN]
+
+    OverallStatus:
+      type: string
+      enum: [PASS, FAIL, REVIEW]
+
+    MatchStatus:
+      type: string
+      enum: [PASS, FAIL, NEEDS_REVIEW, NOT_APPLICABLE]
+
+    FlagSeverity:
+      type: string
+      enum: [ERROR, WARNING, INFO]
+
+    FieldResult:
+      type: object
+      required: [matchStatus, confidence]
+      properties:
+        extractedValue:
+          type: ["string", "null"]
+        expectedValue:
+          type: ["string", "null"]
+        matchStatus:
+          $ref: "#/components/schemas/MatchStatus"
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        failReason:
+          type: ["string", "null"]
+        isMandatory:
+          type: ["boolean", "null"]
+
+    ComplianceFlag:
+      type: object
+      required: [field, severity, message]
+      properties:
+        field:
+          type: string
+        severity:
+          $ref: "#/components/schemas/FlagSeverity"
+        message:
+          type: string
+
+    SameFieldOfVisionResult:
+      type: object
+      required: [compliant, confidence, singleImageWarning]
+      properties:
+        compliant:
+          type: boolean
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        detectedOnPanel:
+          type: ["string", "null"]
+        missingFromPanel:
+          type: array
+          items:
+            type: string
+        singleImageWarning:
+          type: boolean
+
+    LabelAnalysisResult:
+      type: object
+      required:
+        - labelId
+        - sessionId
+        - fileName
+        - beverageType
+        - overallStatus
+        - confidenceScore
+        - brandName
+        - classType
+        - alcoholContent
+        - netContents
+        - governmentWarning
+        - bottlerProducer
+        - labelLanguage
+        - prohibitedSurface
+        - flags
+        - processingMs
+        - analyzedAt
+      properties:
+        labelId:
+          type: string
+        sessionId:
+          type: string
+        fileName:
+          type: string
+        beverageType:
+          $ref: "#/components/schemas/BeverageType"
+        overallStatus:
+          $ref: "#/components/schemas/OverallStatus"
+        confidenceScore:
+          type: number
+          minimum: 0
+          maximum: 1
+        brandName:
+          $ref: "#/components/schemas/FieldResult"
+        classType:
+          $ref: "#/components/schemas/FieldResult"
+        alcoholContent:
+          $ref: "#/components/schemas/FieldResult"
+        netContents:
+          $ref: "#/components/schemas/FieldResult"
+        governmentWarning:
+          $ref: "#/components/schemas/FieldResult"
+        bottlerProducer:
+          $ref: "#/components/schemas/FieldResult"
+        countryOfOrigin:
+          oneOf:
+            - $ref: "#/components/schemas/FieldResult"
+            - type: "null"
+        sameFieldOfVision:
+          oneOf:
+            - $ref: "#/components/schemas/SameFieldOfVisionResult"
+            - type: "null"
+        labelLanguage:
+          $ref: "#/components/schemas/FieldResult"
+        prohibitedSurface:
+          $ref: "#/components/schemas/FieldResult"
+        flags:
+          type: array
+          items:
+            $ref: "#/components/schemas/ComplianceFlag"
+        processingMs:
+          type: number
+        analyzedAt:
+          type: string
+          format: date-time
+
+    BatchAnalysisResult:
+      type: object
+      required:
+        - sessionId
+        - totalCount
+        - passCount
+        - failCount
+        - reviewCount
+        - results
+      properties:
+        sessionId:
+          type: string
+        totalCount:
+          type: integer
+        passCount:
+          type: integer
+        failCount:
+          type: integer
+        reviewCount:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/LabelAnalysisResult"
