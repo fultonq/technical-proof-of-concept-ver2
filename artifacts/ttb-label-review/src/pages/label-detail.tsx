@@ -266,11 +266,11 @@ export default function LabelDetailPage() {
                 <StatusBadge status={result.sameFieldOfVision.compliant ? "PASS" : "FAIL"} className="text-sm px-3 py-1 shrink-0" />
               </CardHeader>
               <CardContent className="pt-5 space-y-3">
-                {result.sameFieldOfVision.missingFromPanel.length > 0 && (
+                {(result.sameFieldOfVision.missingFromPanel ?? []).length > 0 && (
                   <div>
                     <p className="text-sm font-bold uppercase tracking-wider text-fail mb-2">Fields missing from the main panel</p>
                     <ul className="list-disc pl-5 text-base font-medium space-y-1">
-                      {result.sameFieldOfVision.missingFromPanel.map(m => <li key={m}>{m}</li>)}
+                      {(result.sameFieldOfVision.missingFromPanel ?? []).map(m => <li key={m}>{m}</li>)}
                     </ul>
                   </div>
                 )}

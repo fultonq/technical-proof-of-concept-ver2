@@ -1,0 +1,4 @@
+application_id,brand_name,class_type,alcohol_content,net_contents,address,is_imported,country_of_origin,beverage_type,age_statement,color_ingredients,commodity_statement,sulfite_aspartame,appellation,foreign_wine_pct
+001,OLD TOM DISTILLERY,Kentucky Straight Bourbon Whiskey,45% Alc./Vol. (90 Proof),750 mL,123 Main St Louisville KY,False,,Distilled Spirits,4 years,caramel color,,,,
+002,STONE'S THROW,American IPA,6.5% Alc./Vol.,12 oz,456 Oak Ave Portland OR,False,,Malt Beverage,,caramel color,,contains sulfites,,
+003,NAPA SUNSET,Cabernet Sauvignon,13.5% Alc./Vol.,750 mL,789 Vineyard Way Napa CA,False,,Wine,,,,contains sulfites,Napa Valley,

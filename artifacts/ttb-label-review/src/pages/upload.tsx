@@ -1,12 +1,19 @@
 import React, { useState, useRef } from "react";
 import { useLocation } from "wouter";
-import { UploadCloud, FileImage, Layers, Loader2, X, Plus, AlertCircle, Tag, CheckCircle, Wand2, FileText, RefreshCw, FlipHorizontal } from "lucide-react";
+import {
+  UploadCloud, FileImage, Layers, Loader2, X, Plus, AlertCircle, Tag,
+  CheckCircle, Wand2, FileText, RefreshCw, FlipHorizontal, TableProperties,
+  CheckCircle2, XCircle, Clock, ChevronDown, ChevronUp,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { LabelAnalysisResult } from "@workspace/api-client-react";
+import { parseLabelCSV, rowToLabelText, type CsvLabelRow } from "@/lib/csv-label";
+
+// ── Types ──────────────────────────────────────────────────────────────────────
 
 interface QueuedFile {
   id: string;
@@ -16,7 +23,16 @@ interface QueuedFile {
   result?: LabelAnalysisResult;
 }
 
-// Converts an SVG string to a PNG Blob via an off-screen canvas.
+interface CsvRowState extends CsvLabelRow {
+  rowId: string;
+  status: "pending" | "generating" | "checking" | "complete" | "error";
+  error?: string;
+  result?: LabelAnalysisResult;
+  svgPreview?: string;
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
 function svgToBlob(svg: string, width = 600, height = 900): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const svgBlob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
@@ -42,23 +58,40 @@ function svgToBlob(svg: string, width = 600, height = 900): Promise<Blob> {
   });
 }
 
-// Small reusable dropzone for a single image file
+function StatusDot({ status }: { status: CsvRowState["status"] }) {
+  if (status === "pending")    return <span className="inline-block w-2.5 h-2.5 rounded-full bg-muted-foreground/40" />;
+  if (status === "generating") return <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />;
+  if (status === "checking")   return <Loader2 className="w-4 h-4 animate-spin text-review shrink-0" />;
+  if (status === "complete")   return <CheckCircle2 className="w-4 h-4 text-pass shrink-0" />;
+  if (status === "error")      return <AlertCircle className="w-4 h-4 text-fail shrink-0" />;
+  return null;
+}
+
+function RowStatusLabel({ status }: { status: CsvRowState["status"] }) {
+  if (status === "pending")    return <span className="text-xs text-muted-foreground font-semibold">Waiting</span>;
+  if (status === "generating") return <span className="text-xs text-primary font-semibold">Generating image…</span>;
+  if (status === "checking")   return <span className="text-xs text-review font-semibold">Checking compliance…</span>;
+  if (status === "complete") {
+    return null; // result badge handles this
+  }
+  if (status === "error")      return <span className="text-xs text-fail font-semibold">Error</span>;
+  return null;
+}
+
+function OverallBadge({ status }: { status?: string }) {
+  if (!status) return null;
+  if (status === "PASS") return <span className="text-[11px] font-black px-2 py-0.5 rounded bg-pass text-pass-foreground">PASS</span>;
+  if (status === "FAIL") return <span className="text-[11px] font-black px-2 py-0.5 rounded bg-fail text-fail-foreground">FAIL</span>;
+  return <span className="text-[11px] font-black px-2 py-0.5 rounded bg-review text-review-foreground">REVIEW</span>;
+}
+
+// ── Sub-components ─────────────────────────────────────────────────────────────
+
 function ImageDropzone({
-  label,
-  sublabel,
-  file,
-  onFile,
-  isUploading,
-  accept = "image/jpeg,image/png,image/webp",
-  optional = false,
+  label, sublabel, file, onFile, isUploading, optional = false,
 }: {
-  label: string;
-  sublabel: string;
-  file: File | null;
-  onFile: (f: File) => void;
-  isUploading: boolean;
-  accept?: string;
-  optional?: boolean;
+  label: string; sublabel: string; file: File | null;
+  onFile: (f: File) => void; isUploading: boolean; optional?: boolean;
 }) {
   const [isDragOver, setIsDragOver] = useState(false);
   const ref = useRef<HTMLInputElement>(null);
@@ -73,12 +106,7 @@ function ImageDropzone({
       }`}
       onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
       onDragLeave={() => setIsDragOver(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setIsDragOver(false);
-        const f = e.dataTransfer.files?.[0];
-        if (f) onFile(f);
-      }}
+      onDrop={(e) => { e.preventDefault(); setIsDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) onFile(f); }}
       onClick={() => !isUploading && ref.current?.click()}
     >
       <div className="flex flex-col items-center justify-center p-8 text-center min-h-[180px]">
@@ -100,41 +128,50 @@ function ImageDropzone({
           </>
         )}
       </div>
-      <input type="file" ref={ref} className="hidden" accept={accept} onChange={(e) => {
-        const f = e.target.files?.[0];
-        if (f) onFile(f);
-        if (ref.current) ref.current.value = "";
-      }} />
+      <input type="file" ref={ref} className="hidden" accept="image/jpeg,image/png,image/webp"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); if (ref.current) ref.current.value = ""; }} />
     </div>
   );
 }
 
+// ── Main page ──────────────────────────────────────────────────────────────────
+
+type Mode = "single" | "batch" | "generate" | "csv";
+
 export default function UploadPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const [mode, setMode] = useState<"single" | "batch" | "generate">("single");
+  const [mode, setMode] = useState<Mode>("single");
 
-  // ── Single-file mode state ────────────────────────────────────────────────
+  // ── Single-file mode ────────────────────────────────────────────────────
   const [singleFile, setSingleFile] = useState<File | null>(null);
   const [backFile, setBackFile] = useState<File | null>(null);
   const [showBackLabel, setShowBackLabel] = useState(false);
   const [expectedBrandName, setExpectedBrandName] = useState("");
   const [isUploading, setIsUploading] = useState(false);
 
-  // ── Batch mode state ──────────────────────────────────────────────────────
+  // ── Batch image mode ────────────────────────────────────────────────────
   const [batchQueue, setBatchQueue] = useState<QueuedFile[]>([]);
   const [batchSessionId, setBatchSessionId] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const batchFileRef = useRef<HTMLInputElement>(null);
 
-  // ── Generate-mode state ───────────────────────────────────────────────────
+  // ── Generate mode ───────────────────────────────────────────────────────
   const [labelText, setLabelText] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedSvg, setGeneratedSvg] = useState<string | null>(null);
   const [isCheckingGenerated, setIsCheckingGenerated] = useState(false);
   const textFileRef = useRef<HTMLInputElement>(null);
 
-  // ── Upload handlers ───────────────────────────────────────────────────────
+  // ── CSV import mode ─────────────────────────────────────────────────────
+  const [csvRows, setCsvRows] = useState<CsvRowState[]>([]);
+  const [csvFileName, setCsvFileName] = useState<string | null>(null);
+  const [isCsvProcessing, setIsCsvProcessing] = useState(false);
+  const [csvSessionId] = useState(() => crypto.randomUUID());
+  const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const csvFileRef = useRef<HTMLInputElement>(null);
+
+  // ── Single upload ───────────────────────────────────────────────────────
   const uploadSingle = async () => {
     if (!singleFile) return;
     setIsUploading(true);
@@ -143,17 +180,18 @@ export default function UploadPage() {
       formData.append("file", singleFile);
       if (showBackLabel && backFile) formData.append("backFile", backFile);
       if (expectedBrandName.trim()) formData.append("expectedBrandName", expectedBrandName.trim());
-      const response = await fetch("/api/v1/labels/upload", { method: "POST", body: formData });
-      if (!response.ok) throw new Error("Upload failed — please try again.");
-      const data: LabelAnalysisResult = await response.json();
+      const res = await fetch("/api/v1/labels/upload", { method: "POST", body: formData });
+      if (!res.ok) throw new Error("Upload failed — please try again.");
+      const data: LabelAnalysisResult = await res.json();
       setLocation(`/results/${data.sessionId}`);
     } catch (err: any) {
-      toast({ title: "Something went wrong", description: err.message || "Could not process the label. Please try again.", variant: "destructive" });
+      toast({ title: "Something went wrong", description: err.message, variant: "destructive" });
     } finally {
       setIsUploading(false);
     }
   };
 
+  // ── Batch upload ────────────────────────────────────────────────────────
   const uploadBatch = async () => {
     const pending = batchQueue.filter(f => f.status === "pending" || f.status === "error");
     if (!pending.length) return;
@@ -165,9 +203,9 @@ export default function UploadPage() {
         const formData = new FormData();
         formData.append("file", qf.file);
         if (currentSessionId) formData.append("sessionId", currentSessionId);
-        const response = await fetch("/api/v1/labels/upload", { method: "POST", body: formData });
-        if (!response.ok) throw new Error("Failed to process " + qf.file.name);
-        const data: LabelAnalysisResult = await response.json();
+        const res = await fetch("/api/v1/labels/upload", { method: "POST", body: formData });
+        if (!res.ok) throw new Error("Failed to process " + qf.file.name);
+        const data: LabelAnalysisResult = await res.json();
         if (!currentSessionId) { currentSessionId = data.sessionId; setBatchSessionId(data.sessionId); }
         setBatchQueue(prev => prev.map(f => f.id === qf.id ? { ...f, status: "complete", result: data } : f));
       } catch (err: any) {
@@ -178,7 +216,7 @@ export default function UploadPage() {
     if (currentSessionId) setLocation(`/results/${currentSessionId}`);
   };
 
-  // ── Generate mode handlers ────────────────────────────────────────────────
+  // ── Generate mode ───────────────────────────────────────────────────────
   const handleTextFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -193,19 +231,16 @@ export default function UploadPage() {
     setIsGenerating(true);
     setGeneratedSvg(null);
     try {
-      const response = await fetch("/api/v1/labels/generate-preview", {
+      const res = await fetch("/api/v1/labels/generate-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ labelText: labelText.trim() }),
       });
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error((err as any).error || "Generation failed — please try again.");
-      }
-      const { svg } = await response.json();
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any).error || "Generation failed."); }
+      const { svg } = await res.json();
       setGeneratedSvg(svg);
     } catch (err: any) {
-      toast({ title: "Generation failed", description: err.message || "Could not generate the label image.", variant: "destructive" });
+      toast({ title: "Generation failed", description: err.message, variant: "destructive" });
     } finally {
       setIsGenerating(false);
     }
@@ -218,20 +253,97 @@ export default function UploadPage() {
       const blob = await svgToBlob(generatedSvg);
       const formData = new FormData();
       formData.append("file", blob, "generated-label.png");
-      const response = await fetch("/api/v1/labels/upload", { method: "POST", body: formData });
-      if (!response.ok) throw new Error("Compliance check failed — please try again.");
-      const data: LabelAnalysisResult = await response.json();
+      const res = await fetch("/api/v1/labels/upload", { method: "POST", body: formData });
+      if (!res.ok) throw new Error("Compliance check failed.");
+      const data: LabelAnalysisResult = await res.json();
       setLocation(`/results/${data.sessionId}`);
     } catch (err: any) {
-      toast({ title: "Something went wrong", description: err.message || "Could not check the generated label.", variant: "destructive" });
+      toast({ title: "Something went wrong", description: err.message, variant: "destructive" });
     } finally {
       setIsCheckingGenerated(false);
     }
   };
 
-  const pendingCount = batchQueue.filter(f => f.status === "pending" || f.status === "error").length;
-  const switchMode = (m: "single" | "batch" | "generate") => {
-    if (!isUploading) setMode(m);
+  // ── CSV import ──────────────────────────────────────────────────────────
+  const handleCsvFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCsvFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const rows = parseLabelCSV(text);
+      if (rows.length === 0) {
+        toast({ title: "No rows found", description: "The CSV appears to be empty or has an unrecognised format.", variant: "destructive" });
+        return;
+      }
+      setCsvRows(rows.map((r, i) => ({
+        ...r,
+        rowId: `row-${i}-${Date.now()}`,
+        status: "pending",
+      })));
+      setExpandedRow(null);
+    };
+    reader.readAsText(file);
+    if (csvFileRef.current) csvFileRef.current.value = "";
+  };
+
+  // Process all CSV rows: generate SVG → convert to PNG → compliance check
+  const processCsvRows = async () => {
+    const pending = csvRows.filter(r => r.status === "pending" || r.status === "error");
+    if (!pending.length) return;
+    setIsCsvProcessing(true);
+
+    for (const row of pending) {
+      // Step 1 — generate SVG label image
+      setCsvRows(prev => prev.map(r => r.rowId === row.rowId ? { ...r, status: "generating" } : r));
+      let svg: string;
+      try {
+        const labelText = rowToLabelText(row);
+        const res = await fetch("/api/v1/labels/generate-preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ labelText }),
+        });
+        if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any).error || "Image generation failed"); }
+        const data = await res.json();
+        svg = data.svg as string;
+        setCsvRows(prev => prev.map(r => r.rowId === row.rowId ? { ...r, svgPreview: svg } : r));
+      } catch (err: any) {
+        setCsvRows(prev => prev.map(r => r.rowId === row.rowId ? { ...r, status: "error", error: `Image generation: ${err.message}` } : r));
+        continue;
+      }
+
+      // Step 2 — convert SVG → PNG then run compliance
+      setCsvRows(prev => prev.map(r => r.rowId === row.rowId ? { ...r, status: "checking" } : r));
+      try {
+        const blob = await svgToBlob(svg);
+        const formData = new FormData();
+        formData.append("file", blob, `${row.applicationId || row.brandName || "label"}.png`);
+        formData.append("sessionId", csvSessionId);
+        if (row.brandName) formData.append("expectedBrandName", row.brandName);
+        const res = await fetch("/api/v1/labels/upload", { method: "POST", body: formData });
+        if (!res.ok) throw new Error("Compliance check failed");
+        const result: LabelAnalysisResult = await res.json();
+        setCsvRows(prev => prev.map(r => r.rowId === row.rowId ? { ...r, status: "complete", result } : r));
+      } catch (err: any) {
+        setCsvRows(prev => prev.map(r => r.rowId === row.rowId ? { ...r, status: "error", error: `Compliance check: ${err.message}` } : r));
+      }
+    }
+
+    setIsCsvProcessing(false);
+  };
+
+  const allCsvDone = csvRows.length > 0 && csvRows.every(r => r.status === "complete" || r.status === "error");
+  const csvCompleteCount = csvRows.filter(r => r.status === "complete").length;
+  const csvErrorCount = csvRows.filter(r => r.status === "error").length;
+  const csvPendingCount = csvRows.filter(r => r.status === "pending" || r.status === "error").length;
+  const pendingBatchCount = batchQueue.filter(f => f.status === "pending" || f.status === "error").length;
+
+  const BEVERAGE_TYPE_SHORT: Record<string, string> = {
+    "Distilled Spirits": "Spirits",
+    "Malt Beverage": "Malt",
+    "Wine": "Wine",
   };
 
   return (
@@ -241,177 +353,127 @@ export default function UploadPage() {
       <div className="mb-8">
         <h2 className="text-3xl font-bold tracking-tight text-foreground">Check a Label</h2>
         <p className="text-lg text-muted-foreground mt-2">
-          Upload a photo of an alcohol beverage label and we will check it against TTB requirements automatically.
+          Upload label photos or import a CSV of applications to generate and check labels automatically.
           Handles beer, wine, and distilled spirits.
         </p>
       </div>
 
       {/* Mode toggle */}
       <div className="flex flex-wrap gap-3 mb-8">
-        <button
-          onClick={() => switchMode("single")}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-lg border-2 text-base font-semibold transition-all ${mode === "single" ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background text-foreground hover:border-primary/50"}`}
-        >
-          <FileImage className="w-5 h-5" /> One Label
-        </button>
-        <button
-          onClick={() => switchMode("batch")}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-lg border-2 text-base font-semibold transition-all ${mode === "batch" ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background text-foreground hover:border-primary/50"}`}
-        >
-          <Layers className="w-5 h-5" /> Multiple Labels
-        </button>
-        <button
-          onClick={() => switchMode("generate")}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-lg border-2 text-base font-semibold transition-all ${mode === "generate" ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background text-foreground hover:border-primary/50"}`}
-        >
-          <Wand2 className="w-5 h-5" /> Generate Label Image
-        </button>
+        {(["single","batch","generate","csv"] as Mode[]).map((m) => {
+          const icons: Record<Mode, React.ReactNode> = {
+            single: <FileImage className="w-5 h-5" />,
+            batch: <Layers className="w-5 h-5" />,
+            generate: <Wand2 className="w-5 h-5" />,
+            csv: <TableProperties className="w-5 h-5" />,
+          };
+          const labels: Record<Mode, string> = {
+            single: "One Label",
+            batch: "Multiple Labels",
+            generate: "Generate Label Image",
+            csv: "CSV Import",
+          };
+          return (
+            <button key={m}
+              onClick={() => !isUploading && !isCsvProcessing && setMode(m)}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg border-2 text-base font-semibold transition-all ${mode === m ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background text-foreground hover:border-primary/50"}`}
+            >
+              {icons[m]}{labels[m]}
+            </button>
+          );
+        })}
       </div>
 
-      {/* ── ONE LABEL ─────────────────────────────────────────────────────── */}
+      {/* ── ONE LABEL ──────────────────────────────────────────────────── */}
       {mode === "single" && (
         <div className="space-y-6">
-
           {/* Front + Back toggle */}
           <div className="flex items-center justify-between bg-secondary/30 border border-border rounded-xl px-5 py-4">
             <div className="flex items-center gap-3">
               <FlipHorizontal className="w-5 h-5 text-muted-foreground" />
               <div>
                 <p className="font-semibold text-base">Upload front &amp; back label</p>
-                <p className="text-sm text-muted-foreground">Enables AI to read fields split across both sides (e.g. gov warning on back)</p>
+                <p className="text-sm text-muted-foreground">Enables AI to read fields split across both sides</p>
               </div>
             </div>
-            <button
-              onClick={() => { setShowBackLabel(v => !v); setBackFile(null); }}
-              disabled={isUploading}
-              className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border-2 border-transparent transition-colors ${showBackLabel ? "bg-primary" : "bg-muted"}`}
-            >
+            <button onClick={() => { setShowBackLabel(v => !v); setBackFile(null); }} disabled={isUploading}
+              className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border-2 border-transparent transition-colors ${showBackLabel ? "bg-primary" : "bg-muted"}`}>
               <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform ${showBackLabel ? "translate-x-5" : "translate-x-0"}`} />
             </button>
           </div>
 
-          {/* Drop zone(s) */}
           {showBackLabel ? (
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="text-sm font-bold uppercase tracking-wider text-muted-foreground mb-2">Front Label</p>
-                <ImageDropzone
-                  label="Select front label photo"
-                  sublabel="JPEG, PNG, or WebP"
-                  file={singleFile}
-                  onFile={setSingleFile}
-                  isUploading={isUploading}
-                />
+                <ImageDropzone label="Select front label photo" sublabel="JPEG, PNG, or WebP" file={singleFile} onFile={setSingleFile} isUploading={isUploading} />
               </div>
               <div>
                 <p className="text-sm font-bold uppercase tracking-wider text-muted-foreground mb-2">Back Label</p>
-                <ImageDropzone
-                  label="Select back label photo"
-                  sublabel="JPEG, PNG, or WebP"
-                  file={backFile}
-                  onFile={setBackFile}
-                  isUploading={isUploading}
-                  optional
-                />
+                <ImageDropzone label="Select back label photo" sublabel="JPEG, PNG, or WebP" file={backFile} onFile={setBackFile} isUploading={isUploading} optional />
               </div>
             </div>
           ) : (
-            <ImageDropzone
-              label="Click here to select your label photo"
-              sublabel="— or drag and drop the image file onto this area —"
-              file={singleFile}
-              onFile={setSingleFile}
-              isUploading={isUploading}
-            />
+            <ImageDropzone label="Click here to select your label photo" sublabel="— or drag and drop the image file onto this area —" file={singleFile} onFile={setSingleFile} isUploading={isUploading} />
           )}
 
           {isUploading && (
             <div className="flex items-center justify-center gap-3 text-primary font-semibold text-base py-3">
-              <Loader2 className="w-5 h-5 animate-spin" />
-              Reading the label with AI — this takes about 10–15 seconds...
+              <Loader2 className="w-5 h-5 animate-spin" /> Reading the label with AI — this takes about 10–15 seconds…
             </div>
           )}
 
-          {/* Brand name field */}
           <div className="bg-secondary/30 border border-border rounded-xl p-5">
             <Label htmlFor="expectedBrandName" className="flex items-center gap-2 text-base font-semibold mb-1">
-              <Tag className="w-4 h-4 text-muted-foreground" />
-              What is the brand name on this label?
+              <Tag className="w-4 h-4 text-muted-foreground" /> What is the brand name on this label?
             </Label>
-            <p className="text-sm text-muted-foreground mb-3">
-              Filling this in improves accuracy. Leave blank if you do not know it.
-            </p>
-            <Input
-              id="expectedBrandName"
-              placeholder="e.g. OLD TOM DISTILLERY"
-              value={expectedBrandName}
-              onChange={(e) => setExpectedBrandName(e.target.value)}
-              disabled={isUploading}
-              className="text-base h-12 font-mono max-w-sm"
-            />
+            <p className="text-sm text-muted-foreground mb-3">Filling this in improves accuracy. Leave blank if you do not know it.</p>
+            <Input id="expectedBrandName" placeholder="e.g. OLD TOM DISTILLERY" value={expectedBrandName}
+              onChange={(e) => setExpectedBrandName(e.target.value)} disabled={isUploading}
+              className="text-base h-12 font-mono max-w-sm" />
           </div>
 
-          {/* Submit */}
           <div className="flex justify-end pt-2">
-            <Button
-              size="lg"
-              disabled={!singleFile || isUploading}
-              onClick={uploadSingle}
-              className="text-lg px-10 py-4 h-auto font-bold"
-            >
-              {isUploading
-                ? <><Loader2 className="w-5 h-5 mr-3 animate-spin" /> Checking...</>
-                : "Check This Label"}
+            <Button size="lg" disabled={!singleFile || isUploading} onClick={uploadSingle}
+              className="text-lg px-10 py-4 h-auto font-bold">
+              {isUploading ? <><Loader2 className="w-5 h-5 mr-3 animate-spin" /> Checking…</> : "Check This Label"}
             </Button>
           </div>
         </div>
       )}
 
-      {/* ── MULTIPLE LABELS ───────────────────────────────────────────────── */}
+      {/* ── MULTIPLE LABELS ─────────────────────────────────────────────── */}
       {mode === "batch" && (
         <div className="space-y-6">
-
           <div
             className={`border-4 border-dashed rounded-2xl transition-colors cursor-pointer ${isDragOver ? "border-primary bg-primary/5" : "border-border bg-secondary/20 hover:border-primary/50"}`}
             onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
             onDragLeave={() => setIsDragOver(false)}
             onDrop={(e) => {
-              e.preventDefault();
-              setIsDragOver(false);
-              const newFiles = Array.from(e.dataTransfer.files || []).map(f => ({
-                id: Math.random().toString(36).substring(7),
-                file: f,
-                status: "pending" as const,
-              }));
+              e.preventDefault(); setIsDragOver(false);
+              const newFiles = Array.from(e.dataTransfer.files || []).map(f => ({ id: Math.random().toString(36).substring(7), file: f, status: "pending" as const }));
               setBatchQueue(prev => [...prev, ...newFiles]);
             }}
             onClick={() => !isUploading && batchFileRef.current?.click()}
           >
             <div className="flex flex-col items-center justify-center p-12 text-center">
-              <div className="bg-background rounded-full p-4 shadow border mb-4">
-                <Plus className="w-8 h-8 text-muted-foreground" />
-              </div>
+              <div className="bg-background rounded-full p-4 shadow border mb-4"><Plus className="w-8 h-8 text-muted-foreground" /></div>
               <p className="text-xl font-bold mb-1">Add label photos to the list</p>
               <p className="text-base text-muted-foreground">Click here or drag files — you can add multiple at once</p>
             </div>
-            <input type="file" ref={batchFileRef} className="hidden" accept="image/jpeg,image/png,image/webp" multiple onChange={(e) => {
-              const newFiles = Array.from(e.target.files || []).map(f => ({
-                id: Math.random().toString(36).substring(7),
-                file: f,
-                status: "pending" as const,
-              }));
-              setBatchQueue(prev => [...prev, ...newFiles]);
-              if (batchFileRef.current) batchFileRef.current.value = "";
-            }} />
+            <input type="file" ref={batchFileRef} className="hidden" accept="image/jpeg,image/png,image/webp" multiple
+              onChange={(e) => {
+                const newFiles = Array.from(e.target.files || []).map(f => ({ id: Math.random().toString(36).substring(7), file: f, status: "pending" as const }));
+                setBatchQueue(prev => [...prev, ...newFiles]);
+                if (batchFileRef.current) batchFileRef.current.value = "";
+              }} />
           </div>
 
           {batchQueue.length > 0 && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <p className="text-lg font-bold">{batchQueue.length} label{batchQueue.length !== 1 ? "s" : ""} in the list</p>
-                <Button variant="ghost" onClick={() => setBatchQueue([])} disabled={isUploading} className="text-base text-muted-foreground">
-                  Clear all
-                </Button>
+                <Button variant="ghost" onClick={() => setBatchQueue([])} disabled={isUploading} className="text-base text-muted-foreground">Clear all</Button>
               </div>
               <div className="border-2 rounded-xl divide-y overflow-hidden bg-card">
                 {batchQueue.map((item, idx) => (
@@ -423,13 +485,11 @@ export default function UploadPage() {
                     </div>
                     <div className="flex items-center gap-3 shrink-0 ml-3">
                       {item.status === "pending" && <span className="text-sm text-muted-foreground font-semibold">Waiting</span>}
-                      {item.status === "uploading" && <span className="text-sm text-primary flex items-center gap-1 font-semibold"><Loader2 className="w-4 h-4 animate-spin" /> Checking...</span>}
+                      {item.status === "uploading" && <span className="text-sm text-primary flex items-center gap-1 font-semibold"><Loader2 className="w-4 h-4 animate-spin" /> Checking…</span>}
                       {item.status === "complete" && <span className="text-sm text-pass font-bold flex items-center gap-1"><CheckCircle className="w-4 h-4" /> Done</span>}
                       {item.status === "error" && <span className="text-sm text-fail font-bold flex items-center gap-1"><AlertCircle className="w-4 h-4" /> Error</span>}
                       {item.status !== "uploading" && (
-                        <button onClick={() => setBatchQueue(prev => prev.filter(f => f.id !== item.id))} disabled={isUploading} className="text-muted-foreground hover:text-foreground p-1 rounded">
-                          <X className="w-4 h-4" />
-                        </button>
+                        <button onClick={() => setBatchQueue(prev => prev.filter(f => f.id !== item.id))} disabled={isUploading} className="text-muted-foreground hover:text-foreground p-1 rounded"><X className="w-4 h-4" /></button>
                       )}
                     </div>
                   </div>
@@ -439,72 +499,47 @@ export default function UploadPage() {
           )}
 
           <div className="flex justify-end pt-2">
-            <Button
-              size="lg"
-              disabled={pendingCount === 0 || isUploading}
-              onClick={uploadBatch}
-              className="text-lg px-10 py-4 h-auto font-bold"
-            >
-              {isUploading
-                ? <><Loader2 className="w-5 h-5 mr-3 animate-spin" /> Checking labels...</>
-                : `Check ${pendingCount} Label${pendingCount !== 1 ? "s" : ""}`}
+            <Button size="lg" disabled={pendingBatchCount === 0 || isUploading} onClick={uploadBatch} className="text-lg px-10 py-4 h-auto font-bold">
+              {isUploading ? <><Loader2 className="w-5 h-5 mr-3 animate-spin" /> Checking labels…</> : `Check ${pendingBatchCount} Label${pendingBatchCount !== 1 ? "s" : ""}`}
             </Button>
           </div>
         </div>
       )}
 
-      {/* ── GENERATE LABEL IMAGE ──────────────────────────────────────────── */}
+      {/* ── GENERATE LABEL IMAGE ────────────────────────────────────────── */}
       {mode === "generate" && (
         <div className="space-y-6">
-
           <div className="bg-primary/5 border border-primary/20 rounded-xl p-5">
             <p className="text-base font-semibold text-foreground mb-1 flex items-center gap-2">
-              <Wand2 className="w-5 h-5 text-primary" />
-              How this works
+              <Wand2 className="w-5 h-5 text-primary" /> How this works
             </p>
             <p className="text-base text-muted-foreground leading-relaxed">
               Paste or type the label text below — or upload a <code className="text-sm bg-secondary px-1 rounded">.txt</code> file.
               AI will generate a label image from your text, then run a full compliance check on it.
-              Works for beer, wine, and spirits labels.
             </p>
           </div>
 
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <Label className="text-base font-semibold">Label Text</Label>
-              <button
-                onClick={() => textFileRef.current?.click()}
-                className="flex items-center gap-1.5 text-sm text-primary font-semibold hover:underline"
-                disabled={isGenerating}
-              >
+              <button onClick={() => textFileRef.current?.click()} className="flex items-center gap-1.5 text-sm text-primary font-semibold hover:underline" disabled={isGenerating}>
                 <FileText className="w-4 h-4" /> Upload .txt file
               </button>
               <input type="file" ref={textFileRef} className="hidden" accept=".txt,text/plain" onChange={handleTextFileSelect} />
             </div>
             <Textarea
-              placeholder={`Paste your label text here. For example:\n\nBrand Name: STONE'S THROW\nType: Kentucky Straight Bourbon Whiskey\nABV: 45% Alc./Vol.\nNet Contents: 750 mL\nBottled by: Stone's Throw Distillery, 123 Barrel St, Louisville, KY 40202\n\nGOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.`}
+              placeholder={`Brand Name: OLD TOM DISTILLERY\nType: Kentucky Straight Bourbon Whiskey\nABV: 45% Alc./Vol.\nNet Contents: 750 mL\nBottled by: Old Tom Distillery, 123 Barrel St, Louisville, KY 40202\n\nGOVERNMENT WARNING: (1) According to the Surgeon General…`}
               value={labelText}
               onChange={(e) => { setLabelText(e.target.value); setGeneratedSvg(null); }}
               disabled={isGenerating}
               className="text-base min-h-64 font-mono leading-relaxed resize-y"
             />
-            <p className="text-sm text-muted-foreground">
-              Include all label fields: brand name, type, ABV (spirits/wine), net contents, bottler address, and the Government Warning statement.
-              For wine, also include appellation of origin and sulfite declaration.
-            </p>
           </div>
 
           {!generatedSvg && (
             <div className="flex justify-end">
-              <Button
-                size="lg"
-                disabled={!labelText.trim() || isGenerating}
-                onClick={generateLabel}
-                className="text-lg px-10 py-4 h-auto font-bold"
-              >
-                {isGenerating
-                  ? <><Loader2 className="w-5 h-5 mr-3 animate-spin" /> Generating label image...</>
-                  : <><Wand2 className="w-5 h-5 mr-3" /> Generate AI Label Image</>}
+              <Button size="lg" disabled={!labelText.trim() || isGenerating} onClick={generateLabel} className="text-lg px-10 py-4 h-auto font-bold">
+                {isGenerating ? <><Loader2 className="w-5 h-5 mr-3 animate-spin" /> Generating label image…</> : <><Wand2 className="w-5 h-5 mr-3" /> Generate AI Label Image</>}
               </Button>
             </div>
           )}
@@ -512,56 +547,246 @@ export default function UploadPage() {
           {generatedSvg && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <p className="text-lg font-bold text-foreground flex items-center gap-2">
-                  <CheckCircle className="w-5 h-5 text-pass" />
-                  Label image generated
-                </p>
-                <button
-                  onClick={() => { setGeneratedSvg(null); generateLabel(); }}
-                  disabled={isGenerating || isCheckingGenerated}
-                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground font-semibold transition-colors"
-                >
+                <p className="text-lg font-bold text-foreground flex items-center gap-2"><CheckCircle className="w-5 h-5 text-pass" /> Label image generated</p>
+                <button onClick={() => { setGeneratedSvg(null); generateLabel(); }} disabled={isGenerating || isCheckingGenerated}
+                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground font-semibold transition-colors">
                   <RefreshCw className="w-4 h-4" /> Regenerate
                 </button>
               </div>
-
               <div className="border-2 border-border rounded-xl overflow-hidden bg-secondary/10 flex justify-center p-4">
-                <img
-                  src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(generatedSvg)}`}
-                  alt="Generated label preview"
-                  className="max-w-full max-h-[500px] object-contain rounded shadow-md"
-                />
+                <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(generatedSvg)}`} alt="Generated label preview"
+                  className="max-w-full max-h-[500px] object-contain rounded shadow-md" />
               </div>
-
-              <p className="text-sm text-muted-foreground">
-                Review the label above. Click <strong>Check This Label</strong> to run the full TTB compliance check.
-              </p>
-
               <div className="flex gap-3 justify-end">
-                <Button
-                  variant="outline"
-                  size="lg"
-                  disabled={isGenerating || isCheckingGenerated}
-                  onClick={() => setGeneratedSvg(null)}
-                  className="text-base px-6 py-3 h-auto"
-                >
+                <Button variant="outline" size="lg" disabled={isGenerating || isCheckingGenerated} onClick={() => setGeneratedSvg(null)} className="text-base px-6 py-3 h-auto">
                   Edit Text &amp; Regenerate
                 </Button>
-                <Button
-                  size="lg"
-                  disabled={isCheckingGenerated}
-                  onClick={checkGeneratedLabel}
-                  className="text-lg px-10 py-4 h-auto font-bold"
-                >
-                  {isCheckingGenerated
-                    ? <><Loader2 className="w-5 h-5 mr-3 animate-spin" /> Running compliance check...</>
-                    : "Check This Label"}
+                <Button size="lg" disabled={isCheckingGenerated} onClick={checkGeneratedLabel} className="text-lg px-10 py-4 h-auto font-bold">
+                  {isCheckingGenerated ? <><Loader2 className="w-5 h-5 mr-3 animate-spin" /> Running compliance check…</> : "Check This Label"}
                 </Button>
               </div>
             </div>
           )}
         </div>
       )}
+
+      {/* ── CSV IMPORT ──────────────────────────────────────────────────── */}
+      {mode === "csv" && (
+        <div className="space-y-6">
+
+          {/* Explainer */}
+          <div className="bg-primary/5 border border-primary/20 rounded-xl p-5">
+            <p className="text-base font-semibold text-foreground mb-2 flex items-center gap-2">
+              <TableProperties className="w-5 h-5 text-primary" /> How CSV import works
+            </p>
+            <ol className="space-y-1.5 text-base text-muted-foreground list-none">
+              {["Upload a CSV with one row per label application.", "We convert each row into a label layout and generate an AI image.", "The generated image is sent through the full TTB compliance engine.", "All results appear together in a single session report."].map((s, i) => (
+                <li key={i} className="flex items-start gap-3">
+                  <span className="shrink-0 w-6 h-6 rounded-full bg-primary/20 text-primary font-black text-sm flex items-center justify-center mt-0.5">{i + 1}</span>
+                  <span>{s}</span>
+                </li>
+              ))}
+            </ol>
+            <p className="text-sm text-muted-foreground mt-3 pt-3 border-t border-primary/10">
+              Expected columns: <code className="bg-secondary px-1 rounded text-xs">application_id, brand_name, class_type, alcohol_content, net_contents, address, is_imported, country_of_origin, beverage_type, age_statement, color_ingredients, commodity_statement, sulfite_aspartame, appellation, foreign_wine_pct</code>
+            </p>
+          </div>
+
+          {/* CSV file picker */}
+          {csvRows.length === 0 && (
+            <div
+              className="border-4 border-dashed border-border bg-secondary/20 hover:border-primary/50 hover:bg-secondary/40 rounded-2xl transition-colors cursor-pointer"
+              onClick={() => csvFileRef.current?.click()}
+            >
+              <div className="flex flex-col items-center justify-center p-12 text-center">
+                <div className="bg-background rounded-full p-4 shadow border mb-4">
+                  <TableProperties className="w-8 h-8 text-muted-foreground" />
+                </div>
+                <p className="text-xl font-bold mb-1">Click to upload your CSV file</p>
+                <p className="text-base text-muted-foreground">One row per label application, header row required</p>
+              </div>
+              <input type="file" ref={csvFileRef} className="hidden" accept=".csv,text/csv" onChange={handleCsvFile} />
+            </div>
+          )}
+
+          {/* Row preview & progress table */}
+          {csvRows.length > 0 && (
+            <div className="space-y-4">
+              {/* Header bar */}
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div>
+                  <p className="text-lg font-bold text-foreground">
+                    {csvFileName} — {csvRows.length} application{csvRows.length !== 1 ? "s" : ""}
+                  </p>
+                  {isCsvProcessing && (
+                    <p className="text-sm text-muted-foreground mt-0.5">
+                      Processing… {csvCompleteCount + csvErrorCount} of {csvRows.length} done
+                    </p>
+                  )}
+                  {allCsvDone && (
+                    <p className="text-sm text-muted-foreground mt-0.5">
+                      {csvCompleteCount} checked · {csvErrorCount > 0 ? `${csvErrorCount} error${csvErrorCount !== 1 ? "s" : ""}` : "no errors"}
+                    </p>
+                  )}
+                </div>
+                {!isCsvProcessing && (
+                  <button onClick={() => { setCsvRows([]); setCsvFileName(null); }}
+                    className="text-sm text-muted-foreground hover:text-foreground font-semibold flex items-center gap-1.5 transition-colors">
+                    <X className="w-4 h-4" /> Remove file
+                  </button>
+                )}
+              </div>
+
+              {/* Progress summary bar (once processing starts) */}
+              {(isCsvProcessing || allCsvDone) && csvRows.length > 0 && (
+                <div className="h-2.5 bg-muted rounded-full overflow-hidden flex gap-px">
+                  <div className="bg-pass transition-all duration-500" style={{ width: `${(csvCompleteCount / csvRows.length) * 100}%` }} />
+                  <div className="bg-fail transition-all duration-500" style={{ width: `${(csvErrorCount / csvRows.length) * 100}%` }} />
+                </div>
+              )}
+
+              {/* Row list */}
+              <div className="border-2 rounded-xl divide-y overflow-hidden bg-card">
+                {/* Table header */}
+                <div className="grid grid-cols-12 gap-2 px-4 py-2.5 bg-muted/40 border-b">
+                  <div className="col-span-1 text-xs font-bold uppercase tracking-wider text-muted-foreground">#</div>
+                  <div className="col-span-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">Brand Name</div>
+                  <div className="col-span-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">Type</div>
+                  <div className="col-span-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">Category</div>
+                  <div className="col-span-2 text-xs font-bold uppercase tracking-wider text-muted-foreground text-right">Status</div>
+                </div>
+
+                {csvRows.map((row, idx) => {
+                  const isExpanded = expandedRow === row.rowId;
+                  const typeShort = BEVERAGE_TYPE_SHORT[row.beverageType] ?? row.beverageType;
+                  return (
+                    <div key={row.rowId}>
+                      <button
+                        className="w-full grid grid-cols-12 gap-2 px-4 py-3 items-center hover:bg-secondary/20 transition-colors text-left"
+                        onClick={() => setExpandedRow(isExpanded ? null : row.rowId)}
+                        disabled={isCsvProcessing && row.status === "generating"}
+                      >
+                        <div className="col-span-1 flex items-center gap-1.5">
+                          <StatusDot status={row.status} />
+                          <span className="text-xs text-muted-foreground font-mono">{idx + 1}</span>
+                        </div>
+                        <div className="col-span-4 font-semibold text-sm text-foreground truncate">{row.brandName || "—"}</div>
+                        <div className="col-span-3 text-sm text-muted-foreground truncate">{row.classType || "—"}</div>
+                        <div className="col-span-2">
+                          <span className="text-xs bg-secondary text-muted-foreground px-1.5 py-0.5 rounded font-medium">{typeShort}</span>
+                        </div>
+                        <div className="col-span-2 flex items-center justify-end gap-2">
+                          {row.status === "complete" && row.result && <OverallBadge status={row.result.overallStatus} />}
+                          {row.status !== "complete" && <RowStatusLabel status={row.status} />}
+                          {isExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />}
+                        </div>
+                      </button>
+
+                      {/* Expanded row detail */}
+                      {isExpanded && (
+                        <div className="px-4 pb-4 bg-secondary/10 border-t border-border/50 space-y-3">
+                          {/* Field summary */}
+                          <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 pt-3 text-sm">
+                            {[
+                              ["Application ID", row.applicationId],
+                              ["Alcohol Content", row.alcoholContent],
+                              ["Net Contents", row.netContents],
+                              ["Address", row.address],
+                              ["Country of Origin", row.isImported ? row.countryOfOrigin : (row.beverageType?.toLowerCase().includes("wine") ? row.countryOfOrigin || "United States" : "Domestic")],
+                              ["Appellation", row.appellation],
+                              ["Sulfite / Aspartame", row.sulfiteAspartame],
+                              ["Age Statement", row.ageStatement],
+                            ].filter(([, v]) => v).map(([k, v]) => (
+                              <div key={k} className="flex gap-2">
+                                <span className="text-muted-foreground shrink-0 w-36">{k}:</span>
+                                <span className="font-medium text-foreground">{v}</span>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* SVG preview (shown once generated) */}
+                          {row.svgPreview && (
+                            <div className="mt-2">
+                              <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">Generated Label Preview</p>
+                              <img
+                                src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(row.svgPreview)}`}
+                                alt={`Generated label for ${row.brandName}`}
+                                className="max-h-48 rounded border border-border shadow-sm object-contain bg-white"
+                              />
+                            </div>
+                          )}
+
+                          {/* Error detail */}
+                          {row.status === "error" && row.error && (
+                            <div className="flex items-start gap-2 text-sm text-fail bg-fail/5 border border-fail/20 rounded-lg px-3 py-2">
+                              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                              {row.error}
+                            </div>
+                          )}
+
+                          {/* Compliance result summary */}
+                          {row.status === "complete" && row.result && (
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-3">
+                                {row.result.overallStatus === "PASS" && <CheckCircle2 className="w-5 h-5 text-pass" />}
+                                {row.result.overallStatus === "FAIL" && <XCircle className="w-5 h-5 text-fail" />}
+                                {row.result.overallStatus === "REVIEW" && <Clock className="w-5 h-5 text-review" />}
+                                <span className="font-bold text-base">
+                                  {row.result.overallStatus === "PASS" && "All compliance checks passed"}
+                                  {row.result.overallStatus === "FAIL" && `${row.result.flags.filter(f => f.severity === "ERROR").length} compliance problem(s) found`}
+                                  {row.result.overallStatus === "REVIEW" && "Needs human review"}
+                                </span>
+                              </div>
+                              {row.result.flags.length > 0 && (
+                                <ul className="space-y-1 pl-8">
+                                  {row.result.flags.slice(0, 4).map((f, i) => (
+                                    <li key={i} className="text-sm text-muted-foreground flex items-start gap-1.5">
+                                      {f.severity === "ERROR" ? <AlertCircle className="w-3.5 h-3.5 text-fail shrink-0 mt-0.5" /> : <AlertCircle className="w-3.5 h-3.5 text-review shrink-0 mt-0.5" />}
+                                      {f.message}
+                                    </li>
+                                  ))}
+                                  {row.result.flags.length > 4 && <li className="text-sm text-muted-foreground pl-5">+{row.result.flags.length - 4} more — see full report</li>}
+                                </ul>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Actions */}
+              <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
+                {allCsvDone ? (
+                  <Button size="lg" onClick={() => setLocation(`/results/${csvSessionId}`)}
+                    className="text-lg px-10 py-4 h-auto font-bold">
+                    View Full Session Report →
+                  </Button>
+                ) : (
+                  <Button size="lg"
+                    disabled={csvPendingCount === 0 || isCsvProcessing}
+                    onClick={processCsvRows}
+                    className="text-lg px-10 py-4 h-auto font-bold">
+                    {isCsvProcessing
+                      ? <><Loader2 className="w-5 h-5 mr-3 animate-spin" /> Processing {csvRows.length} application{csvRows.length !== 1 ? "s" : ""}…</>
+                      : <><Wand2 className="w-5 h-5 mr-3" /> Generate &amp; Check All {csvRows.length} Labels</>}
+                  </Button>
+                )}
+                {allCsvDone && csvErrorCount > 0 && (
+                  <button onClick={() => setCsvRows(prev => prev.map(r => r.status === "error" ? { ...r, status: "pending", error: undefined } : r))}
+                    disabled={isCsvProcessing}
+                    className="text-sm font-semibold text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors">
+                    <RefreshCw className="w-4 h-4" /> Retry {csvErrorCount} error{csvErrorCount !== 1 ? "s" : ""}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
     </div>
   );
 }
