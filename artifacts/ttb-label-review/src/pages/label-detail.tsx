@@ -4,17 +4,26 @@ import { useGetLabelResult, getGetLabelResultQueryKey } from "@workspace/api-cli
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ConfidenceBar } from "@/components/ui/confidence-bar";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, AlertTriangle, Info, CheckCircle2, ChevronRight, Loader2, AlertCircle } from "lucide-react";
+import { ArrowLeft, AlertTriangle, Info, CheckCircle2, XCircle, Clock, Loader2, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 
 function FlagIcon({ severity }: { severity: string }) {
-  switch (severity) {
-    case "ERROR": return <AlertCircle className="w-5 h-5 text-fail" />;
-    case "WARNING": return <AlertTriangle className="w-5 h-5 text-review" />;
-    default: return <Info className="w-5 h-5 text-blue-500" />;
-  }
+  if (severity === "ERROR") return <AlertCircle className="w-5 h-5 text-fail shrink-0" />;
+  if (severity === "WARNING") return <AlertTriangle className="w-5 h-5 text-review shrink-0" />;
+  return <Info className="w-5 h-5 text-blue-500 shrink-0" />;
 }
+
+const FIELD_LABELS: Record<string, string> = {
+  brandName: "Brand Name",
+  classType: "Type of Beverage",
+  alcoholContent: "Alcohol Content (ABV)",
+  netContents: "Bottle Size",
+  bottlerProducer: "Bottler / Producer",
+  countryOfOrigin: "Country of Origin",
+  labelLanguage: "Label Language",
+  prohibitedSurface: "Prohibited Content",
+};
 
 export default function LabelDetailPage() {
   const [, params] = useRoute("/results/:sessionId/:labelId");
@@ -22,251 +31,235 @@ export default function LabelDetailPage() {
   const labelId = params?.labelId || "";
 
   const { data: result, isLoading, isError, error } = useGetLabelResult(labelId, {
-    query: {
-      enabled: !!labelId,
-      queryKey: getGetLabelResultQueryKey(labelId),
-    }
+    query: { enabled: !!labelId, queryKey: getGetLabelResultQueryKey(labelId) }
   });
 
   if (isLoading) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-8">
-        <Loader2 className="w-10 h-10 animate-spin text-primary mb-4" />
-        <h2 className="text-xl font-semibold">Loading Analysis Details...</h2>
+      <div className="flex-1 flex flex-col items-center justify-center p-12 gap-4">
+        <Loader2 className="w-12 h-12 animate-spin text-primary" />
+        <p className="text-2xl font-semibold">Loading report...</p>
       </div>
     );
   }
 
   if (isError || !result) {
     return (
-      <div className="flex-1 p-8 max-w-4xl mx-auto w-full">
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Error</AlertTitle>
-          <AlertDescription>
-            Could not load label details. {(error as any)?.message || "Unknown error occurred."}
-          </AlertDescription>
+      <div className="flex-1 p-8 max-w-3xl mx-auto w-full space-y-6">
+        <Alert variant="destructive" className="text-base">
+          <AlertCircle className="h-5 w-5" />
+          <AlertTitle className="text-lg font-bold">Could not load this report</AlertTitle>
+          <AlertDescription>{(error as any)?.message || "Something went wrong. Please go back and try again."}</AlertDescription>
         </Alert>
-        <div className="mt-6">
-          <Link href={`/results/${sessionId}`}>
-            <Button variant="outline">
-              <ArrowLeft className="w-4 h-4 mr-2" /> Back to Dashboard
-            </Button>
-          </Link>
-        </div>
+        <Link href={`/results/${sessionId}`}>
+          <Button size="lg" variant="outline" className="text-base"><ArrowLeft className="w-5 h-5 mr-2" /> Back to Results</Button>
+        </Link>
       </div>
     );
   }
 
-  const renderFieldRow = (label: string, field: any) => {
-    if (!field) return null;
-    return (
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 py-4 border-b border-border last:border-0 hover:bg-secondary/10 px-4 -mx-4 rounded-md transition-colors">
-        <div className="md:col-span-3">
-          <span className="font-semibold text-sm text-foreground">{label}</span>
-          {field.isMandatory && <span className="ml-2 text-[10px] uppercase font-bold text-destructive bg-destructive/10 px-1.5 py-0.5 rounded">Req</span>}
-        </div>
-        <div className="md:col-span-4 font-mono text-sm break-words">
-          {field.extractedValue || <span className="text-muted-foreground italic">Not detected</span>}
-        </div>
-        <div className="md:col-span-2">
-          <StatusBadge status={field.matchStatus} />
-        </div>
-        <div className="md:col-span-3">
-          <ConfidenceBar score={field.confidence} />
-          {field.failReason && (
-            <p className="text-xs text-fail mt-1.5 flex items-start gap-1">
-              <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-              <span>{field.failReason}</span>
-            </p>
-          )}
-        </div>
-      </div>
-    );
-  };
+  const status = result.overallStatus;
+  const flagCount = result.flags.filter(f => f.severity === "ERROR").length;
 
   return (
     <div className="flex-1 flex flex-col pb-20">
-      {/* Header */}
-      <div className="bg-card border-b border-border p-6 shadow-sm sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto w-full">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
-            <Link href="/" className="hover:text-primary transition-colors flex items-center">
-              Upload
-            </Link>
-            <ChevronRight className="w-3 h-3" />
-            <Link href={`/results/${sessionId}`} className="hover:text-primary transition-colors font-mono">
-              {sessionId.substring(0, 8)}...
-            </Link>
-            <ChevronRight className="w-3 h-3" />
-            <span className="font-mono truncate max-w-[200px]">{result.fileName}</span>
-          </div>
 
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+      {/* ── VERDICT BANNER ─────────────────────────────────── */}
+      {status === "PASS" && (
+        <div className="bg-pass text-pass-foreground px-6 py-8">
+          <div className="max-w-5xl mx-auto flex items-center gap-5">
+            <CheckCircle2 className="w-14 h-14 shrink-0" />
             <div>
-              <h2 className="text-3xl font-bold text-foreground mb-2 break-all">{result.fileName}</h2>
-              <div className="flex flex-wrap items-center gap-3">
-                <StatusBadge status={result.overallStatus} className="text-sm px-3 py-1" />
-                <span className="text-sm font-medium border border-border px-2.5 py-1 rounded bg-background">
-                  Type: {result.beverageType}
-                </span>
-                <span className="text-sm text-muted-foreground">
-                  Processed in {(result.processingMs / 1000).toFixed(2)}s
-                </span>
-              </div>
-            </div>
-            
-            <div className="flex flex-col items-end gap-2 bg-background p-3 rounded-lg border border-border">
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Overall Confidence</span>
-              <div className="w-48">
-                <ConfidenceBar score={result.confidenceScore} />
-              </div>
+              <p className="text-3xl font-black tracking-tight">This Label Passed</p>
+              <p className="text-lg opacity-90 mt-1">All required TTB fields were found and are compliant. No issues detected.</p>
             </div>
           </div>
         </div>
+      )}
+      {status === "FAIL" && (
+        <div className="bg-fail text-fail-foreground px-6 py-8">
+          <div className="max-w-5xl mx-auto flex items-center gap-5">
+            <XCircle className="w-14 h-14 shrink-0" />
+            <div>
+              <p className="text-3xl font-black tracking-tight">This Label Failed</p>
+              <p className="text-lg opacity-90 mt-1">
+                {flagCount > 0
+                  ? `${flagCount} compliance problem${flagCount !== 1 ? "s were" : " was"} found that must be corrected before approval.`
+                  : "One or more required fields are missing or do not meet TTB requirements."}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      {status === "REVIEW" && (
+        <div className="bg-review text-review-foreground px-6 py-8">
+          <div className="max-w-5xl mx-auto flex items-center gap-5">
+            <Clock className="w-14 h-14 shrink-0" />
+            <div>
+              <p className="text-3xl font-black tracking-tight">Needs Human Review</p>
+              <p className="text-lg opacity-90 mt-1">The AI was not fully confident on one or more fields. A human reviewer should verify the items marked below.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── BREADCRUMB + FILE NAME ──────────────────────────── */}
+      <div className="bg-card border-b border-border px-6 py-5 shadow-sm">
+        <div className="max-w-5xl mx-auto">
+          <div className="flex items-center gap-2 text-base text-muted-foreground mb-1">
+            <Link href="/" className="hover:text-primary">Upload</Link>
+            <span>/</span>
+            <Link href={`/results/${sessionId}`} className="hover:text-primary">Results</Link>
+            <span>/</span>
+            <span className="truncate max-w-[200px] text-foreground font-medium">{result.fileName}</span>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Beverage type: <strong>{result.beverageType}</strong> &nbsp;·&nbsp; Checked in {(result.processingMs / 1000).toFixed(1)}s
+          </p>
+        </div>
       </div>
 
-      <div className="max-w-6xl mx-auto w-full p-6 grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* Left Column: Details */}
+      {/* ── MAIN CONTENT ──────────────────────────────────────── */}
+      <div className="max-w-5xl mx-auto w-full p-6 grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+        {/* Left: field results */}
         <div className="lg:col-span-2 space-y-8">
-          
-          {/* Extracted Fields */}
+
+          {/* Field-by-field table */}
           <Card className="shadow-sm">
             <CardHeader className="border-b border-border bg-secondary/30 pb-4">
-              <CardTitle>Extracted Label Data</CardTitle>
-              <CardDescription>Verified against CFR Title 27 requirements</CardDescription>
+              <CardTitle className="text-xl">What We Found on This Label</CardTitle>
+              <CardDescription className="text-base">Each required field and whether it passed the check.</CardDescription>
             </CardHeader>
-            <CardContent className="pt-2 pb-2">
-              <div className="flex flex-col">
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-4 py-2 border-b border-border/50 text-xs font-bold uppercase tracking-wider text-muted-foreground px-4 -mx-4">
-                  <div className="md:col-span-3">Field</div>
-                  <div className="md:col-span-4">Value</div>
-                  <div className="md:col-span-2">Status</div>
-                  <div className="md:col-span-3">Confidence</div>
-                </div>
-                {renderFieldRow("Brand Name", result.brandName)}
-                {renderFieldRow("Class & Type", result.classType)}
-                {renderFieldRow("Alcohol Content", result.alcoholContent)}
-                {renderFieldRow("Net Contents", result.netContents)}
-                {renderFieldRow("Bottler/Producer", result.bottlerProducer)}
-                {result.countryOfOrigin && renderFieldRow("Country of Origin", result.countryOfOrigin)}
-                {renderFieldRow("Language", result.labelLanguage)}
-                {renderFieldRow("Prohibited Content", result.prohibitedSurface)}
+            <CardContent className="p-0">
+              {/* Column headers */}
+              <div className="grid grid-cols-12 gap-2 px-5 py-3 border-b border-border/50 bg-muted/30">
+                <div className="col-span-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">Field</div>
+                <div className="col-span-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">Found on label</div>
+                <div className="col-span-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">Result</div>
               </div>
+              {(["brandName","classType","alcoholContent","netContents","bottlerProducer","countryOfOrigin","labelLanguage","prohibitedSurface"] as const).map((key) => {
+                const field = result[key as keyof typeof result] as any;
+                if (!field || typeof field !== "object" || !("matchStatus" in field)) return null;
+                return (
+                  <div key={key} className="grid grid-cols-12 gap-2 px-5 py-4 border-b border-border last:border-0 hover:bg-secondary/10 transition-colors items-start">
+                    <div className="col-span-4">
+                      <span className="font-semibold text-base text-foreground">{FIELD_LABELS[key] ?? key}</span>
+                      {field.isMandatory && <span className="ml-2 text-[10px] uppercase font-bold text-destructive bg-destructive/10 px-1.5 py-0.5 rounded">Required</span>}
+                    </div>
+                    <div className="col-span-4 font-mono text-sm break-words text-foreground">
+                      {field.extractedValue || <span className="text-muted-foreground italic">Not found</span>}
+                    </div>
+                    <div className="col-span-4 space-y-1.5">
+                      <StatusBadge status={field.matchStatus} />
+                      {field.failReason && (
+                        <p className="text-sm text-fail flex items-start gap-1.5 mt-1">
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                          {field.failReason}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </CardContent>
           </Card>
 
-          {/* Government Warning Special Section */}
-          <Card className={result.governmentWarning.matchStatus === "FAIL" ? "border-destructive shadow-sm" : "shadow-sm"}>
+          {/* Government Warning */}
+          <Card className={`shadow-sm ${result.governmentWarning.matchStatus === "FAIL" ? "border-destructive border-2" : ""}`}>
             <CardHeader className="border-b border-border bg-secondary/30 pb-4 flex flex-row items-center justify-between">
               <div>
-                <CardTitle>Government Warning</CardTitle>
-                <CardDescription>Strict verbatim match required</CardDescription>
+                <CardTitle className="text-xl">Health Warning Statement</CardTitle>
+                <CardDescription className="text-base">The full government warning must appear word-for-word on every label.</CardDescription>
               </div>
-              <StatusBadge status={result.governmentWarning.matchStatus} />
+              <StatusBadge status={result.governmentWarning.matchStatus} className="text-sm px-3 py-1 shrink-0" />
             </CardHeader>
-            <CardContent className="pt-6">
-              <div className="space-y-4">
-                {result.governmentWarning.failReason && (
-                  <Alert variant="destructive" className="bg-destructive/5 border-destructive/20">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertTitle>Non-compliant Text</AlertTitle>
-                    <AlertDescription>{result.governmentWarning.failReason}</AlertDescription>
-                  </Alert>
-                )}
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">Detected Text</h4>
-                    <div className="bg-secondary/30 p-4 rounded border font-mono text-sm min-h-[120px] whitespace-pre-wrap">
-                      {result.governmentWarning.extractedValue || <span className="text-muted-foreground italic">No text detected</span>}
-                    </div>
+            <CardContent className="pt-5 space-y-4">
+              {result.governmentWarning.failReason && (
+                <Alert variant="destructive" className="bg-destructive/5 border-destructive/20">
+                  <AlertCircle className="h-5 w-5" />
+                  <AlertTitle className="text-base font-bold">Problem found</AlertTitle>
+                  <AlertDescription className="text-base">{result.governmentWarning.failReason}</AlertDescription>
+                </Alert>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div>
+                  <p className="text-sm font-bold uppercase tracking-wider text-muted-foreground mb-2">Text found on this label</p>
+                  <div className="bg-secondary/30 border rounded-lg p-4 font-mono text-sm min-h-[120px] whitespace-pre-wrap leading-relaxed">
+                    {result.governmentWarning.extractedValue || <span className="text-muted-foreground italic">No warning text detected</span>}
                   </div>
-                  <div>
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">Required Verbatim</h4>
-                    <div className="bg-primary/5 border border-primary/20 p-4 rounded font-mono text-sm min-h-[120px] whitespace-pre-wrap">
-                      {result.governmentWarning.expectedValue || "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems."}
-                    </div>
+                </div>
+                <div>
+                  <p className="text-sm font-bold uppercase tracking-wider text-muted-foreground mb-2">Required wording</p>
+                  <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 font-mono text-sm min-h-[120px] whitespace-pre-wrap leading-relaxed">
+                    {result.governmentWarning.expectedValue || "GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems."}
                   </div>
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          {/* SFOV */}
+          {/* Same Field of Vision */}
           {result.sameFieldOfVision && (
             <Card className="shadow-sm">
               <CardHeader className="border-b border-border bg-secondary/30 pb-4 flex flex-row items-center justify-between">
                 <div>
-                  <CardTitle>Same Field of Vision</CardTitle>
-                  <CardDescription>Mandatory fields must appear together</CardDescription>
+                  <CardTitle className="text-xl">Panel Layout Check</CardTitle>
+                  <CardDescription className="text-base">Key fields must appear together on the same side of the label.</CardDescription>
                 </div>
-                <StatusBadge status={result.sameFieldOfVision.compliant ? "PASS" : "FAIL"} />
+                <StatusBadge status={result.sameFieldOfVision.compliant ? "PASS" : "FAIL"} className="text-sm px-3 py-1 shrink-0" />
               </CardHeader>
-              <CardContent className="pt-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <CardContent className="pt-5 space-y-3">
+                {result.sameFieldOfVision.missingFromPanel.length > 0 && (
                   <div>
-                    <span className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1">Detected on Panel</span>
-                    <span className="font-medium">{result.sameFieldOfVision.detectedOnPanel || "Unknown"}</span>
+                    <p className="text-sm font-bold uppercase tracking-wider text-fail mb-2">Fields missing from the main panel</p>
+                    <ul className="list-disc pl-5 text-base font-medium space-y-1">
+                      {result.sameFieldOfVision.missingFromPanel.map(m => <li key={m}>{m}</li>)}
+                    </ul>
                   </div>
-                  {result.sameFieldOfVision.missingFromPanel.length > 0 && (
-                    <div>
-                      <span className="block text-xs font-bold uppercase tracking-wider text-fail mb-1">Missing from Panel</span>
-                      <ul className="list-disc pl-4 text-sm font-medium">
-                        {result.sameFieldOfVision.missingFromPanel.map(m => (
-                          <li key={m}>{m}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
+                )}
                 {result.sameFieldOfVision.singleImageWarning && (
-                  <Alert className="mt-4 bg-review/5 border-review/20">
-                    <Info className="h-4 w-4 text-review" />
-                    <AlertTitle className="text-review">Single Image Warning</AlertTitle>
-                    <AlertDescription className="text-foreground">
-                      Only one image was provided. Cannot definitively verify Same Field of Vision rules across multiple container faces.
+                  <Alert className="bg-review/5 border-review/20">
+                    <Info className="h-5 w-5 text-review" />
+                    <AlertTitle className="text-base font-bold text-review">Only one image provided</AlertTitle>
+                    <AlertDescription className="text-base">
+                      To fully verify this requirement, upload photos of all sides of the label.
                     </AlertDescription>
                   </Alert>
                 )}
               </CardContent>
             </Card>
           )}
-
         </div>
 
-        {/* Right Column: Flags & Actions */}
+        {/* Right: flags + actions */}
         <div className="space-y-6">
+
+          {/* Problems found */}
           <Card className="shadow-sm border-t-4 border-t-primary">
-            <CardHeader className="pb-3 border-b border-border">
-              <CardTitle className="flex items-center justify-between">
-                <span>Compliance Flags</span>
-                <span className="bg-muted px-2.5 py-0.5 rounded-full text-sm font-bold tabular-nums">
+            <CardHeader className="border-b border-border pb-3">
+              <CardTitle className="text-xl flex items-center justify-between">
+                Problems Found
+                <span className={`text-base font-black px-3 py-1 rounded-full ${result.flags.length > 0 ? "bg-fail/10 text-fail" : "bg-pass/10 text-pass"}`}>
                   {result.flags.length}
                 </span>
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
               {result.flags.length === 0 ? (
-                <div className="p-8 text-center text-muted-foreground flex flex-col items-center">
-                  <CheckCircle2 className="w-12 h-12 text-pass/50 mb-3" />
-                  <p className="font-medium text-foreground">No flags detected</p>
-                  <p className="text-sm mt-1">Label passes all automated compliance checks.</p>
+                <div className="p-8 text-center flex flex-col items-center gap-3">
+                  <CheckCircle2 className="w-14 h-14 text-pass/60" />
+                  <p className="text-lg font-bold text-foreground">No problems detected</p>
+                  <p className="text-base text-muted-foreground">This label passed all automated compliance checks.</p>
                 </div>
               ) : (
                 <div className="divide-y divide-border">
                   {result.flags.map((flag, i) => (
-                    <div key={i} className="p-4 flex gap-3 hover:bg-secondary/20 transition-colors">
-                      <div className="mt-0.5">
-                        <FlagIcon severity={flag.severity} />
-                      </div>
+                    <div key={i} className="p-4 flex gap-3">
+                      <FlagIcon severity={flag.severity} />
                       <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-semibold text-sm">{flag.field}</span>
-                          <StatusBadge status={flag.severity} className="text-[10px] px-1.5 py-0 scale-90 origin-left" />
-                        </div>
-                        <p className="text-sm text-muted-foreground leading-snug">{flag.message}</p>
+                        <p className="font-bold text-base text-foreground mb-0.5">{flag.field}</p>
+                        <p className="text-base text-muted-foreground leading-snug">{flag.message}</p>
                       </div>
                     </div>
                   ))}
@@ -275,26 +268,27 @@ export default function LabelDetailPage() {
             </CardContent>
           </Card>
 
+          {/* Actions */}
           <Card className="shadow-sm">
-            <CardHeader>
-              <CardTitle>Evaluator Actions</CardTitle>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-xl">What to Do Next</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <Link href={`/results/${sessionId}`}>
-                <Button className="w-full justify-start" variant="outline">
-                  <ArrowLeft className="w-4 h-4 mr-2" /> Back to Session
+                <Button className="w-full justify-start text-base py-3 h-auto" variant="outline">
+                  <ArrowLeft className="w-5 h-5 mr-2" /> Back to All Results
                 </Button>
               </Link>
-              <Button className="w-full justify-start bg-pass text-pass-foreground hover:bg-pass/90">
-                <CheckCircle2 className="w-4 h-4 mr-2" /> Mark as Approved
+              <Button className="w-full justify-start text-base py-3 h-auto bg-pass text-pass-foreground hover:bg-pass/90">
+                <CheckCircle2 className="w-5 h-5 mr-2" /> Mark as Approved
               </Button>
-              <Button className="w-full justify-start bg-fail text-fail-foreground hover:bg-fail/90">
-                <AlertCircle className="w-4 h-4 mr-2" /> Issue Correction Notice
+              <Button className="w-full justify-start text-base py-3 h-auto bg-fail text-fail-foreground hover:bg-fail/90">
+                <XCircle className="w-5 h-5 mr-2" /> Issue Correction Notice
               </Button>
             </CardContent>
           </Card>
-        </div>
 
+        </div>
       </div>
     </div>
   );
