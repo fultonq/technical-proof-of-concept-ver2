@@ -4,14 +4,18 @@ import {
   UploadCloud, FileImage, Layers, Loader2, X, Plus, AlertCircle, Tag,
   CheckCircle, Wand2, FileText, RefreshCw, FlipHorizontal, TableProperties,
   CheckCircle2, XCircle, Clock, ChevronDown, ChevronUp, StopCircle,
+  Download, Printer, ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { LabelAnalysisResult } from "@workspace/api-client-react";
 import { parseLabelCSV, rowToLabelText, type CsvLabelRow } from "@/lib/csv-label";
+import { exportSessionToCSV } from "@/lib/csv-export";
+import { generatePrintReport } from "@/lib/print-report";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -93,6 +97,144 @@ function OverallBadge({ status }: { status?: string }) {
   if (status === "PASS") return <span className="text-[11px] font-black px-2 py-0.5 rounded bg-pass text-pass-foreground">PASS</span>;
   if (status === "FAIL") return <span className="text-[11px] font-black px-2 py-0.5 rounded bg-fail text-fail-foreground">FAIL</span>;
   return <span className="text-[11px] font-black px-2 py-0.5 rounded bg-review text-review-foreground">REVIEW</span>;
+}
+
+// ── CSV Row Detail Modal ───────────────────────────────────────────────────────
+
+function CsvRowDetailModal({
+  row,
+  onClose,
+}: {
+  row: CsvRowState | null;
+  onClose: () => void;
+}) {
+  const [, setLocation] = useLocation();
+  if (!row || !row.result) return null;
+  const r = row.result;
+
+  const errorCount = r.flags.filter(f => f.severity === "ERROR").length;
+  const warnCount  = r.flags.filter(f => f.severity === "WARNING").length;
+
+  const fieldRows: Array<{ label: string; extracted: string | null | undefined; status: string }> = [
+    { label: "Brand Name",        extracted: r.brandName.extractedValue,       status: r.brandName.matchStatus },
+    { label: "Class / Type",      extracted: r.classType.extractedValue,        status: r.classType.matchStatus },
+    { label: "Alcohol Content",   extracted: r.alcoholContent.extractedValue,   status: r.alcoholContent.matchStatus },
+    { label: "Net Contents",      extracted: r.netContents.extractedValue,      status: r.netContents.matchStatus },
+    { label: "Govt. Warning",     extracted: r.governmentWarning.extractedValue ? "Present" : null, status: r.governmentWarning.matchStatus },
+    { label: "Bottler / Producer",extracted: r.bottlerProducer.extractedValue,  status: r.bottlerProducer.matchStatus },
+    ...(r.countryOfOrigin   ? [{ label: "Country of Origin",    extracted: r.countryOfOrigin.extractedValue,    status: r.countryOfOrigin.matchStatus }]   : []),
+    ...(r.appellationOfOrigin ? [{ label: "Appellation",        extracted: r.appellationOfOrigin.extractedValue,status: r.appellationOfOrigin.matchStatus }] : []),
+    ...(r.sulfiteDeclaration  ? [{ label: "Sulfite Declaration", extracted: r.sulfiteDeclaration.extractedValue, status: r.sulfiteDeclaration.matchStatus }]  : []),
+    ...(r.labelLanguage       ? [{ label: "Label Language",      extracted: r.labelLanguage.extractedValue,      status: r.labelLanguage.matchStatus }]        : []),
+  ];
+
+  const statusColor = r.overallStatus === "PASS" ? "bg-pass/10 border-pass/30 text-pass"
+    : r.overallStatus === "FAIL" ? "bg-fail/10 border-fail/30 text-fail"
+    : "bg-review/10 border-review/30 text-review";
+
+  const fieldStatusColor = (s: string) => s === "PASS" ? "text-pass" : s === "FAIL" ? "text-fail" : s === "NEEDS_REVIEW" ? "text-review" : "text-muted-foreground";
+
+  return (
+    <Dialog open={!!row} onOpenChange={open => !open && onClose()}>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto p-0">
+
+        {/* Sticky header */}
+        <DialogHeader className="px-6 pt-5 pb-4 border-b sticky top-0 bg-background z-10">
+          <div className="flex items-start justify-between gap-4 pr-6">
+            <div>
+              <DialogTitle className="text-xl font-bold">{row.brandName || "Label Detail"}</DialogTitle>
+              <p className="text-sm text-muted-foreground mt-0.5">{row.classType || row.beverageType}</p>
+            </div>
+            <span className={`text-sm font-black px-3 py-1 rounded-full border ${statusColor}`}>
+              {r.overallStatus}
+            </span>
+          </div>
+        </DialogHeader>
+
+        {/* Body */}
+        <div className="flex gap-6 p-6">
+
+          {/* Left: label image */}
+          {row.svgPreview && (
+            <div className="shrink-0 w-52">
+              <img
+                src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(row.svgPreview)}`}
+                alt={`Generated label for ${row.brandName}`}
+                className="w-full rounded-lg border border-border shadow object-contain bg-white"
+              />
+              <p className="text-xs text-muted-foreground text-center mt-1.5">AI-generated label</p>
+            </div>
+          )}
+
+          {/* Right: compliance detail */}
+          <div className="flex-1 min-w-0 space-y-5">
+
+            {/* Status summary card */}
+            <div className={`rounded-lg px-4 py-3 flex items-center gap-3 border ${statusColor.replace("text-pass","").replace("text-fail","").replace("text-review","")}`}>
+              {r.overallStatus === "PASS" && <CheckCircle2 className="w-5 h-5 text-pass shrink-0" />}
+              {r.overallStatus === "FAIL" && <XCircle className="w-5 h-5 text-fail shrink-0" />}
+              {r.overallStatus === "REVIEW" && <Clock className="w-5 h-5 text-review shrink-0" />}
+              <div>
+                <p className="font-bold text-sm">
+                  {r.overallStatus === "PASS" && "All mandatory fields pass — label is compliant"}
+                  {r.overallStatus === "FAIL" && `${errorCount} compliance error${errorCount !== 1 ? "s" : ""}${warnCount > 0 ? `, ${warnCount} warning${warnCount !== 1 ? "s" : ""}` : ""}`}
+                  {r.overallStatus === "REVIEW" && `Needs human review${warnCount > 0 ? ` — ${warnCount} item${warnCount !== 1 ? "s" : ""} flagged` : ""}`}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Confidence: {Math.round(r.confidenceScore * 100)}% · {r.beverageType}
+                </p>
+              </div>
+            </div>
+
+            {/* Flags */}
+            {r.flags.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Issues ({r.flags.length})</p>
+                <ul className="space-y-1.5">
+                  {r.flags.map((f, i) => (
+                    <li key={i} className={`flex items-start gap-2 rounded-lg px-3 py-2 text-sm ${
+                      f.severity === "ERROR" ? "bg-fail/5 border border-fail/20" : "bg-review/5 border border-review/20"
+                    }`}>
+                      <AlertCircle className={`w-4 h-4 shrink-0 mt-0.5 ${f.severity === "ERROR" ? "text-fail" : "text-review"}`} />
+                      <span>{f.message}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Field breakdown */}
+            <div className="space-y-2">
+              <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Field Breakdown</p>
+              <div className="border rounded-lg overflow-hidden divide-y text-sm">
+                {fieldRows.map(({ label, extracted, status }) => (
+                  <div key={label} className="grid grid-cols-[152px_1fr_96px] gap-2 px-3 py-2 hover:bg-secondary/20">
+                    <span className="text-muted-foreground font-medium truncate">{label}</span>
+                    <span className="truncate text-foreground">
+                      {extracted ?? <span className="text-muted-foreground italic">Not found</span>}
+                    </span>
+                    <span className={`text-right text-[11px] font-black ${fieldStatusColor(status)}`}>{status}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 pb-5 flex justify-between items-center border-t pt-4">
+          <button className="text-sm text-muted-foreground hover:text-foreground transition-colors" onClick={onClose}>
+            Close
+          </button>
+          <Button onClick={() => { onClose(); setLocation(`/labels/${r.labelId}`); }}>
+            <ExternalLink className="w-4 h-4 mr-2" /> Open Full Report
+          </Button>
+        </div>
+
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
@@ -180,6 +322,7 @@ export default function UploadPage() {
   const [isCsvProcessing, setIsCsvProcessing] = useState(false);
   const [csvSessionId] = useState(() => crypto.randomUUID());
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [modalRow, setModalRow] = useState<CsvRowState | null>(null);
   const csvFileRef = useRef<HTMLInputElement>(null);
   // Abort controller for the currently in-flight fetch — aborted immediately on Stop.
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -773,7 +916,15 @@ export default function UploadPage() {
                           <span className="text-xs bg-secondary text-muted-foreground px-1.5 py-0.5 rounded font-medium">{typeShort}</span>
                         </div>
                         <div className="col-span-2 flex items-center justify-end gap-2">
-                          {row.status === "complete" && row.result && <OverallBadge status={row.result.overallStatus} />}
+                          {row.status === "complete" && row.result && (
+                            <button
+                              className="cursor-pointer hover:opacity-75 transition-opacity"
+                              onClick={(e) => { e.stopPropagation(); setModalRow(row); }}
+                              title="Click to open compliance detail"
+                            >
+                              <OverallBadge status={row.result.overallStatus} />
+                            </button>
+                          )}
                           {row.status !== "complete" && <RowStatusLabel status={row.status} />}
                           {isExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />}
                         </div>
@@ -801,15 +952,27 @@ export default function UploadPage() {
                             ))}
                           </div>
 
-                          {/* SVG preview (shown once generated) */}
+                          {/* SVG preview (shown once generated) — click to open detail modal */}
                           {row.svgPreview && (
                             <div className="mt-2">
                               <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">Generated Label Preview</p>
-                              <img
-                                src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(row.svgPreview)}`}
-                                alt={`Generated label for ${row.brandName}`}
-                                className="max-h-48 rounded border border-border shadow-sm object-contain bg-white"
-                              />
+                              <button
+                                className="group relative block rounded border border-border shadow-sm overflow-hidden bg-white hover:border-primary/50 transition-colors cursor-zoom-in"
+                                onClick={() => row.result && setModalRow(row)}
+                                title={row.result ? "Click to view full compliance detail" : undefined}
+                                disabled={!row.result}
+                              >
+                                <img
+                                  src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(row.svgPreview)}`}
+                                  alt={`Generated label for ${row.brandName}`}
+                                  className="max-h-48 object-contain"
+                                />
+                                {row.result && (
+                                  <span className="absolute bottom-1.5 right-1.5 bg-background/80 text-foreground text-[10px] font-semibold px-1.5 py-0.5 rounded shadow opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                                    View detail
+                                  </span>
+                                )}
+                              </button>
                             </div>
                           )}
 
@@ -895,6 +1058,38 @@ export default function UploadPage() {
                       className="text-lg px-10 py-4 h-auto font-bold">
                       View Full Session Report →
                     </Button>
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      className="text-base px-6 py-3 h-auto"
+                      onClick={() => {
+                        const results = csvRows.filter(r => r.status === "complete" && r.result).map(r => r.result!);
+                        exportSessionToCSV(results, `ttb-report-${csvSessionId.slice(0, 8)}.csv`);
+                      }}
+                    >
+                      <Download className="w-4 h-4 mr-2" /> Download CSV
+                    </Button>
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      className="text-base px-6 py-3 h-auto"
+                      onClick={() => {
+                        const results = csvRows.filter(r => r.status === "complete" && r.result).map(r => r.result!);
+                        const sessionData = {
+                          sessionId: csvSessionId,
+                          totalCount: results.length,
+                          passCount:  results.filter(r => r.overallStatus === "PASS").length,
+                          failCount:  results.filter(r => r.overallStatus === "FAIL").length,
+                          reviewCount:results.filter(r => r.overallStatus === "REVIEW").length,
+                          results,
+                        };
+                        const html = generatePrintReport(sessionData, {}, csvSessionId, {});
+                        const win = window.open("", "_blank");
+                        if (win) { win.document.write(html); win.document.close(); win.print(); }
+                      }}
+                    >
+                      <Printer className="w-4 h-4 mr-2" /> Print Report
+                    </Button>
                     {csvErrorCount > 0 && (
                       <button
                         onClick={() => setCsvRows(prev => prev.map(r => r.status === "error" ? { ...r, status: "pending", error: undefined } : r))}
@@ -946,6 +1141,9 @@ export default function UploadPage() {
           )}
         </div>
       )}
+
+      {/* CSV row detail modal — opened by clicking a row's status badge or label image */}
+      <CsvRowDetailModal row={modalRow} onClose={() => setModalRow(null)} />
 
     </div>
   );
