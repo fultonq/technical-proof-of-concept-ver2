@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { analyzeLabel, buildBatchSummary } from "../lib/label-analyzer.js";
 import { getLabelById, getSession, deleteSession } from "../lib/session-store.js";
 import { batchProcess } from "@workspace/integrations-anthropic-ai/batch";
+import { generateLabelSvg } from "../lib/label-generator.js";
 
 const router: IRouter = Router();
 
@@ -81,6 +82,27 @@ router.post(
     }
   },
 );
+
+// Generates a realistic SVG beverage label from free-form label text.
+// Returns { svg: string } — the client converts it to a PNG for compliance checking.
+router.post("/v1/labels/generate-preview", async (req, res) => {
+  const { labelText } = req.body as { labelText?: string };
+  if (!labelText || !labelText.trim()) {
+    res.status(400).json({ error: "labelText is required." });
+    return;
+  }
+  if (labelText.length > 8000) {
+    res.status(400).json({ error: "labelText must be under 8000 characters." });
+    return;
+  }
+  try {
+    const svg = await generateLabelSvg(labelText);
+    res.json({ svg });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: `Label image generation failed: ${message}` });
+  }
+});
 
 router.get("/v1/labels/session/:sessionId", (req, res) => {
   const { sessionId } = req.params;
