@@ -76,7 +76,10 @@ export default function LabelDetailPage() {
     setLocalReviewAction(action);
   };
 
-  // ── Approve dialog ─────────────────────────────────────────────────────
+  // ── Block dialog (FAIL label tries direct approval) ────────────────────
+  const [showBlockDialog, setShowBlockDialog] = useState(false);
+
+  // ── Override dialog ─────────────────────────────────────────────────────
   const [showApproveDialog, setShowApproveDialog] = useState(false);
   const [overrideNote, setOverrideNote] = useState("");
 
@@ -143,15 +146,14 @@ export default function LabelDetailPage() {
     ...(isWine ? ["appellationOfOrigin","sulfiteDeclaration"] : []),
   ];
 
-  // Whether clicking Approve requires the override flow (FAIL or REVIEW)
-  const requiresOverride = status === "FAIL" || status === "REVIEW";
+  // Whether this label has compliance failures that block simple approval
+  const isBlocked = status === "FAIL" || status === "REVIEW";
 
-  const handleApprove = () => {
-    if (requiresOverride) {
-      setOverrideNote("");
-      setShowApproveDialog(true);
+  // "Mark as Approved" — direct for PASS, blocking dialog for FAIL/REVIEW
+  const handleDirectApprove = () => {
+    if (isBlocked) {
+      setShowBlockDialog(true);
     } else {
-      // PASS — direct approval
       saveAction({
         decision: "APPROVED",
         note: "",
@@ -159,6 +161,12 @@ export default function LabelDetailPage() {
         actionDate: new Date().toISOString(),
       });
     }
+  };
+
+  // "Approve with Override" — always opens the justification dialog
+  const handleOpenOverride = () => {
+    setOverrideNote("");
+    setShowApproveDialog(true);
   };
 
   const handleConfirmOverride = () => {
@@ -536,18 +544,23 @@ export default function LabelDetailPage() {
                 </div>
               )}
 
-              {/* ── Approve button ─────────────────────────────────────── */}
+              {/* ── Mark as Approved ───────────────────────────────────── */}
               {(!reviewAction || reviewAction.decision === "CORRECTION_ISSUED") && (
                 <Button
-                  className={`w-full justify-start text-base py-3 h-auto ${
-                    requiresOverride
-                      ? "bg-review text-review-foreground hover:bg-review/90"
-                      : "bg-pass text-pass-foreground hover:bg-pass/90"
-                  }`}
-                  onClick={handleApprove}
+                  className="w-full justify-start text-base py-3 h-auto bg-pass text-pass-foreground hover:bg-pass/90"
+                  onClick={handleDirectApprove}
                 >
-                  <CheckCircle2 className="w-5 h-5 mr-2" />
-                  {requiresOverride ? "Approve with Override…" : "Mark as Approved"}
+                  <CheckCircle2 className="w-5 h-5 mr-2" /> Mark as Approved
+                </Button>
+              )}
+
+              {/* ── Approve with Override ──────────────────────────────── */}
+              {(!reviewAction || reviewAction.decision === "CORRECTION_ISSUED") && (
+                <Button
+                  className="w-full justify-start text-base py-3 h-auto bg-review text-review-foreground hover:bg-review/90"
+                  onClick={handleOpenOverride}
+                >
+                  <ShieldCheck className="w-5 h-5 mr-2" /> Approve with Override…
                 </Button>
               )}
 
@@ -575,6 +588,58 @@ export default function LabelDetailPage() {
           </Card>
         </div>
       </div>
+
+      {/* ════════════════════════════════════════════════════════════════════
+          BLOCK DIALOG — shown when agent tries to approve a FAIL/REVIEW label
+          without using the override path
+          ════════════════════════════════════════════════════════════════════ */}
+      <Dialog open={showBlockDialog} onOpenChange={setShowBlockDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl text-fail">
+              <XCircle className="w-5 h-5 shrink-0" />
+              Approval Not Permitted
+            </DialogTitle>
+            <DialogDescription className="text-base">
+              {status === "FAIL"
+                ? "This label has failed one or more mandatory TTB compliance checks and cannot be given a standard approval."
+                : "This label has fields that require human verification and cannot be given a standard approval until they are confirmed."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {result.flags.length > 0 && (
+            <div className="rounded-lg border border-border bg-secondary/20 divide-y divide-border max-h-40 overflow-y-auto">
+              {result.flags.map((flag, i) => (
+                <div key={i} className="flex items-start gap-2 px-4 py-2.5">
+                  <FlagIcon severity={flag.severity} />
+                  <div>
+                    <p className="text-sm font-bold text-foreground">{FIELD_LABELS[flag.field] ?? flag.field}</p>
+                    <p className="text-sm text-muted-foreground leading-snug">{flag.message}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <p className="text-sm text-muted-foreground">
+            If you have additional context that justifies approval despite these findings, use <strong>Approve with Override</strong> and provide a written justification.
+          </p>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowBlockDialog(false)}>Cancel</Button>
+            <Button
+              className="bg-review text-review-foreground hover:bg-review/90"
+              onClick={() => {
+                setShowBlockDialog(false);
+                setOverrideNote("");
+                setShowApproveDialog(true);
+              }}
+            >
+              <ShieldCheck className="w-4 h-4 mr-2" /> Use Override Approval
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ════════════════════════════════════════════════════════════════════
           APPROVE DIALOG (override flow for FAIL / REVIEW)
