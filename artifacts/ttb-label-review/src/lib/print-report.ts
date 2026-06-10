@@ -1,10 +1,13 @@
 import { LabelAnalysisResult } from "@workspace/api-client-react";
 
-const BEVERAGE_LABELS: Record<string, string> = {
-  SPIRITS: "Distilled Spirits (27 CFR Part 5)",
-  WINE: "Wine (27 CFR Part 4)",
-  MALT: "Beer / Malt Beverage (27 CFR Part 7)",
-  UNKNOWN: "Unknown",
+// Canonical display order for beverage type sections.
+const TYPE_ORDER = ["SPIRITS", "WINE", "MALT", "UNKNOWN"] as const;
+
+const BEVERAGE_META: Record<string, { label: string; cfr: string; accent: string }> = {
+  SPIRITS: { label: "Distilled Spirits",     cfr: "27 CFR Part 5",  accent: "#7c3aed" },
+  WINE:    { label: "Wine",                  cfr: "27 CFR Part 4",  accent: "#0369a1" },
+  MALT:    { label: "Beer / Malt Beverage",  cfr: "27 CFR Part 7",  accent: "#b45309" },
+  UNKNOWN: { label: "Unknown Beverage Type", cfr: "Type not determined", accent: "#6b7280" },
 };
 
 function esc(s: string | null | undefined): string {
@@ -14,6 +17,54 @@ function esc(s: string | null | undefined): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+const STATUS_COLORS: Record<string, { bg: string; fg: string }> = {
+  PASS:   { bg: "#dcfce7", fg: "#15803d" },
+  FAIL:   { bg: "#fee2e2", fg: "#b91c1c" },
+  REVIEW: { bg: "#fef3c7", fg: "#b45309" },
+};
+
+function buildLabelRow(r: LabelAnalysisResult, rowIndex: number, globalSeq: number, comment: string): string {
+  const { bg, fg } = STATUS_COLORS[r.overallStatus] ?? { bg: "#f3f4f6", fg: "#374151" };
+  const errors   = r.flags.filter(f => f.severity === "ERROR");
+  const warnings = r.flags.filter(f => f.severity === "WARNING");
+  const issuesHtml =
+    r.flags.length === 0
+      ? `<span style="color:#15803d;font-weight:600;">&#10003; No issues</span>`
+      : [
+          ...errors.map(  f => `<div style="color:#b91c1c;margin-bottom:3px;">&#9940; ${esc(f.message)}</div>`),
+          ...warnings.map(f => `<div style="color:#b45309;margin-bottom:3px;">&#9888; ${esc(f.message)}</div>`),
+        ].join("");
+  const rowBg = rowIndex % 2 === 0 ? "#ffffff" : "#f9fafb";
+  return `
+    <tr style="page-break-inside:avoid;background:${rowBg};">
+      <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;text-align:center;color:#9ca3af;font-weight:700;font-size:11px;">${globalSeq}</td>
+      <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;">
+        <div style="font-weight:700;font-size:13px;word-break:break-word;">${esc(r.fileName)}</div>
+      </td>
+      <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;font-family:'Courier New',monospace;font-size:13px;">
+        ${r.brandName.extractedValue
+          ? esc(r.brandName.extractedValue)
+          : `<span style="color:#9ca3af;font-style:italic;">Not detected</span>`}
+      </td>
+      <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">
+        <span style="display:inline-block;padding:3px 10px;border-radius:4px;font-weight:800;font-size:12px;letter-spacing:0.5px;background:${bg};color:${fg};">
+          ${esc(r.overallStatus)}
+        </span>
+      </td>
+      <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;font-size:12px;max-width:260px;">${issuesHtml}</td>
+      <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;font-size:12px;color:#374151;min-width:140px;">
+        ${comment
+          ? `<div style="white-space:pre-wrap;">${esc(comment)}</div>`
+          : `<span style="color:#d1d5db;font-style:italic;">&#8212;</span>`}
+      </td>
+    </tr>`;
+}
+
+function miniPill(count: number, label: string, color: string): string {
+  if (count === 0) return "";
+  return `<span style="display:inline-block;margin-right:10px;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700;background:${color}20;color:${color};font-family:sans-serif;">${count} ${label}</span>`;
 }
 
 export interface SessionData {
@@ -35,58 +86,62 @@ export function generatePrintReport(
   });
   const timeStr = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 
-  const labelRows = sessionData.results
-    .map((r, i) => {
-      const statusColors: Record<string, { bg: string; fg: string }> = {
-        PASS:   { bg: "#dcfce7", fg: "#15803d" },
-        FAIL:   { bg: "#fee2e2", fg: "#b91c1c" },
-        REVIEW: { bg: "#fef3c7", fg: "#b45309" },
-      };
-      const { bg, fg } = statusColors[r.overallStatus] ?? { bg: "#f3f4f6", fg: "#374151" };
+  // Group results by beverage type, preserving canonical order.
+  const groups: Record<string, LabelAnalysisResult[]> = {};
+  for (const r of sessionData.results) {
+    const key = r.beverageType ?? "UNKNOWN";
+    (groups[key] ??= []).push(r);
+  }
 
-      const errors   = r.flags.filter(f => f.severity === "ERROR");
-      const warnings = r.flags.filter(f => f.severity === "WARNING");
-      const issuesHtml =
-        r.flags.length === 0
-          ? `<span style="color:#15803d;font-weight:600;">&#10003; No issues</span>`
-          : [
-              ...errors.map(
-                f => `<div style="color:#b91c1c;margin-bottom:3px;">&#9940; ${esc(f.message)}</div>`,
-              ),
-              ...warnings.map(
-                f => `<div style="color:#b45309;margin-bottom:3px;">&#9888; ${esc(f.message)}</div>`,
-              ),
-            ].join("");
+  // Build a table section for each type that has at least one label.
+  let globalSeq = 0;
+  const sections = TYPE_ORDER
+    .filter(type => (groups[type]?.length ?? 0) > 0)
+    .map(type => {
+      const meta   = BEVERAGE_META[type] ?? BEVERAGE_META["UNKNOWN"];
+      const labels = groups[type];
+      const pass   = labels.filter(r => r.overallStatus === "PASS").length;
+      const fail   = labels.filter(r => r.overallStatus === "FAIL").length;
+      const review = labels.filter(r => r.overallStatus === "REVIEW").length;
 
-      const comment = comments[r.labelId] ?? "";
-      const rowBg = i % 2 === 0 ? "#ffffff" : "#f9fafb";
+      const rows = labels.map((r, i) => {
+        globalSeq += 1;
+        return buildLabelRow(r, i, globalSeq, comments[r.labelId] ?? "");
+      }).join("");
 
       return `
-      <tr style="page-break-inside:avoid;background:${rowBg};">
-        <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;text-align:center;color:#9ca3af;font-weight:700;font-size:12px;">${i + 1}</td>
-        <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;">
-          <div style="font-weight:700;font-size:13px;word-break:break-word;">${esc(r.fileName)}</div>
-          <div style="color:#6b7280;font-size:11px;margin-top:2px;">${esc(BEVERAGE_LABELS[r.beverageType] ?? r.beverageType)}</div>
-        </td>
-        <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;font-family:'Courier New',monospace;font-size:13px;">
-          ${r.brandName.extractedValue
-            ? esc(r.brandName.extractedValue)
-            : `<span style="color:#9ca3af;font-style:italic;">Not detected</span>`}
-        </td>
-        <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;text-align:center;">
-          <span style="display:inline-block;padding:3px 10px;border-radius:4px;font-weight:800;font-size:12px;letter-spacing:0.5px;background:${bg};color:${fg};">
-            ${esc(r.overallStatus)}
-          </span>
-        </td>
-        <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;font-size:12px;max-width:260px;">${issuesHtml}</td>
-        <td style="padding:9px 8px;border-bottom:1px solid #e5e7eb;font-size:12px;color:#374151;min-width:140px;">
-          ${comment
-            ? `<div style="white-space:pre-wrap;">${esc(comment)}</div>`
-            : `<span style="color:#d1d5db;font-style:italic;">&#8212;</span>`}
-        </td>
-      </tr>`;
-    })
-    .join("");
+      <!-- ── ${meta.label} section ── -->
+      <div style="margin-bottom:28px;page-break-inside:avoid;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px;
+                    border-left:5px solid ${meta.accent};padding:8px 14px;background:${meta.accent}0d;margin-bottom:8px;">
+          <div>
+            <span style="font-size:15px;font-weight:900;color:${meta.accent};text-transform:uppercase;letter-spacing:0.5px;font-family:sans-serif;">
+              ${esc(meta.label)}
+            </span>
+            <span style="margin-left:10px;font-size:11px;color:#6b7280;font-family:sans-serif;">${esc(meta.cfr)}</span>
+          </div>
+          <div style="font-size:12px;">
+            <span style="color:#6b7280;font-family:sans-serif;margin-right:6px;">${labels.length} label${labels.length !== 1 ? "s" : ""} &nbsp;&#8212;</span>
+            ${miniPill(pass,   "PASS",   "#15803d")}
+            ${miniPill(review, "REVIEW", "#b45309")}
+            ${miniPill(fail,   "FAIL",   "#b91c1c")}
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width:32px;">#</th>
+              <th style="min-width:140px;">Label File</th>
+              <th style="min-width:110px;">Brand Name</th>
+              <th style="width:72px;text-align:center;">Result</th>
+              <th>Compliance Issues</th>
+              <th style="min-width:140px;">Reviewer Comment</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+    }).join("");
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -117,23 +172,23 @@ export function generatePrintReport(
     }
     .container { max-width: 1160px; margin: 0 auto; padding: 28px 36px 40px; }
     .gov-header { text-align: center; border-bottom: 4px double #1e3a5f; padding-bottom: 14px; margin-bottom: 18px; }
-    .gov-dept { font-size: 11px; letter-spacing: 2.5px; text-transform: uppercase; color: #6b7280; margin-bottom: 5px; font-family: sans-serif; }
+    .gov-dept  { font-size: 11px; letter-spacing: 2.5px; text-transform: uppercase; color: #6b7280; margin-bottom: 5px; font-family: sans-serif; }
     .gov-title { font-size: 21px; font-weight: 900; letter-spacing: 0.5px; text-transform: uppercase; color: #1e3a5f; }
-    .gov-sub { font-size: 12px; color: #6b7280; margin-top: 5px; font-family: sans-serif; }
-    .meta-bar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; border: 1px solid #e5e7eb; background: #f9fafb; padding: 11px 16px; margin-bottom: 18px; border-radius: 4px; font-family: sans-serif; font-size: 12px; }
+    .gov-sub   { font-size: 12px; color: #6b7280; margin-top: 5px; font-family: sans-serif; }
+    .meta-bar  { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; border: 1px solid #e5e7eb; background: #f9fafb; padding: 11px 16px; margin-bottom: 18px; border-radius: 4px; font-family: sans-serif; font-size: 12px; }
     .meta-item label { display: block; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #9ca3af; font-size: 10px; margin-bottom: 2px; }
-    .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 22px; }
-    .sum-card { border: 2px solid; border-radius: 8px; padding: 14px 12px; text-align: center; }
+    .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 24px; }
+    .sum-card  { border: 2px solid; border-radius: 8px; padding: 14px 12px; text-align: center; }
     .sum-count { font-size: 38px; font-weight: 900; line-height: 1; }
     .sum-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-top: 5px; font-family: sans-serif; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 28px; font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
     thead { background: #1e3a5f; color: #fff; }
     thead th { padding: 9px 8px; text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; font-family: sans-serif; }
-    .sig-section { margin-top: 10px; border-top: 2px solid #1e3a5f; padding-top: 18px; }
+    .sig-section { margin-top: 16px; border-top: 2px solid #1e3a5f; padding-top: 18px; page-break-inside: avoid; }
     .sig-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #6b7280; margin-bottom: 14px; font-family: sans-serif; }
-    .sig-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 32px; }
-    .sig-line { border-bottom: 1px solid #374151; height: 34px; margin-bottom: 5px; }
-    .sig-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280; font-family: sans-serif; }
+    .sig-grid  { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 32px; }
+    .sig-line  { border-bottom: 1px solid #374151; height: 34px; margin-bottom: 5px; }
+    .sig-lbl   { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280; font-family: sans-serif; }
     .report-footer { text-align: center; font-size: 10px; color: #9ca3af; margin-top: 20px; border-top: 1px solid #e5e7eb; padding-top: 10px; font-family: sans-serif; }
   </style>
 </head>
@@ -141,7 +196,7 @@ export function generatePrintReport(
   <div class="no-print">
     <button class="print-btn" onclick="window.print()">&#128438; Print / Save as PDF</button>
     <button class="close-btn" onclick="window.close()">Close</button>
-    <span style="margin-left:14px;color:#6b7280;font-size:13px;">Tip: Choose &ldquo;Save as PDF&rdquo; in your print dialog to keep a digital copy.</span>
+    <span style="margin-left:14px;color:#6b7280;font-size:13px;">Tip: choose &ldquo;Save as PDF&rdquo; in your print dialog to keep a digital copy.</span>
   </div>
 
   <div class="container">
@@ -167,6 +222,7 @@ export function generatePrintReport(
       </div>
     </div>
 
+    <!-- Overall summary -->
     <div class="summary-grid">
       <div class="sum-card" style="border-color:#16a34a;background:#f0fdf4;">
         <div class="sum-count" style="color:#15803d;">${sessionData.passCount}</div>
@@ -182,21 +238,8 @@ export function generatePrintReport(
       </div>
     </div>
 
-    <table>
-      <thead>
-        <tr>
-          <th style="width:32px;">#</th>
-          <th style="min-width:140px;">Label File / Beverage Type</th>
-          <th style="min-width:110px;">Brand Name</th>
-          <th style="width:72px;text-align:center;">Result</th>
-          <th>Compliance Issues</th>
-          <th style="min-width:140px;">Reviewer Comment</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${labelRows}
-      </tbody>
-    </table>
+    <!-- One section per beverage type, in regulatory order -->
+    ${sections}
 
     <div class="sig-section">
       <div class="sig-title">Reviewer Certification</div>
