@@ -18,7 +18,9 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
- * @summary Upload single label image for analysis
+ * Accepts a front label image (required) and optional back label image. When both are supplied, Claude Vision analyzes them together so fields split across front/back panels are correctly extracted.
+
+ * @summary Upload one or two label images for analysis
  */
 export const UploadLabelBody = zod.object({
   "sessionId": zod.string().nullish(),
@@ -30,6 +32,7 @@ export const UploadLabelBody = zod.object({
 
 export const uploadLabelResponseConfidenceScoreMin = 0;
 export const uploadLabelResponseConfidenceScoreMax = 1;
+
 
 export const uploadLabelResponseBrandNameConfidenceMin = 0;
 export const uploadLabelResponseBrandNameConfidenceMax = 1;
@@ -61,6 +64,12 @@ export const uploadLabelResponseLabelLanguageConfidenceMax = 1;
 export const uploadLabelResponseProhibitedSurfaceConfidenceMin = 0;
 export const uploadLabelResponseProhibitedSurfaceConfidenceMax = 1;
 
+export const uploadLabelResponseAppellationOfOriginOneConfidenceMin = 0;
+export const uploadLabelResponseAppellationOfOriginOneConfidenceMax = 1;
+
+export const uploadLabelResponseSulfiteDeclarationOneConfidenceMin = 0;
+export const uploadLabelResponseSulfiteDeclarationOneConfidenceMax = 1;
+
 
 
 export const UploadLabelResponse = zod.object({
@@ -70,6 +79,7 @@ export const UploadLabelResponse = zod.object({
   "beverageType": zod.enum(['SPIRITS', 'WINE', 'MALT', 'UNKNOWN']),
   "overallStatus": zod.enum(['PASS', 'FAIL', 'REVIEW']),
   "confidenceScore": zod.number().min(uploadLabelResponseConfidenceScoreMin).max(uploadLabelResponseConfidenceScoreMax),
+  "imagesAnalyzed": zod.number().min(1).describe('Number of label images analyzed (1 for front only, 2 for front + back)'),
   "brandName": zod.object({
   "extractedValue": zod.string().nullish(),
   "expectedValue": zod.string().nullish(),
@@ -149,6 +159,22 @@ export const UploadLabelResponse = zod.object({
   "failReason": zod.string().nullish(),
   "isMandatory": zod.boolean().nullish()
 }),
+  "appellationOfOrigin": zod.union([zod.object({
+  "extractedValue": zod.string().nullish(),
+  "expectedValue": zod.string().nullish(),
+  "matchStatus": zod.enum(['PASS', 'FAIL', 'NEEDS_REVIEW', 'NOT_APPLICABLE']),
+  "confidence": zod.number().min(uploadLabelResponseAppellationOfOriginOneConfidenceMin).max(uploadLabelResponseAppellationOfOriginOneConfidenceMax),
+  "failReason": zod.string().nullish(),
+  "isMandatory": zod.boolean().nullish()
+}),zod.null()]).optional().describe('Wine only — appellation of origin check (27 CFR 4.23). Null for spirits and malt.'),
+  "sulfiteDeclaration": zod.union([zod.object({
+  "extractedValue": zod.string().nullish(),
+  "expectedValue": zod.string().nullish(),
+  "matchStatus": zod.enum(['PASS', 'FAIL', 'NEEDS_REVIEW', 'NOT_APPLICABLE']),
+  "confidence": zod.number().min(uploadLabelResponseSulfiteDeclarationOneConfidenceMin).max(uploadLabelResponseSulfiteDeclarationOneConfidenceMax),
+  "failReason": zod.string().nullish(),
+  "isMandatory": zod.boolean().nullish()
+}),zod.null()]).optional().describe('Wine only — sulfite declaration check (27 CFR 4.32(b)(1)). Null for spirits and malt.'),
   "flags": zod.array(zod.object({
   "field": zod.string(),
   "severity": zod.enum(['ERROR', 'WARNING', 'INFO']),
@@ -168,6 +194,7 @@ export const UploadLabelBatchBody = zod.object({
 
 export const uploadLabelBatchResponseResultsItemConfidenceScoreMin = 0;
 export const uploadLabelBatchResponseResultsItemConfidenceScoreMax = 1;
+
 
 export const uploadLabelBatchResponseResultsItemBrandNameConfidenceMin = 0;
 export const uploadLabelBatchResponseResultsItemBrandNameConfidenceMax = 1;
@@ -199,6 +226,12 @@ export const uploadLabelBatchResponseResultsItemLabelLanguageConfidenceMax = 1;
 export const uploadLabelBatchResponseResultsItemProhibitedSurfaceConfidenceMin = 0;
 export const uploadLabelBatchResponseResultsItemProhibitedSurfaceConfidenceMax = 1;
 
+export const uploadLabelBatchResponseResultsItemAppellationOfOriginOneConfidenceMin = 0;
+export const uploadLabelBatchResponseResultsItemAppellationOfOriginOneConfidenceMax = 1;
+
+export const uploadLabelBatchResponseResultsItemSulfiteDeclarationOneConfidenceMin = 0;
+export const uploadLabelBatchResponseResultsItemSulfiteDeclarationOneConfidenceMax = 1;
+
 
 
 export const UploadLabelBatchResponse = zod.object({
@@ -214,6 +247,7 @@ export const UploadLabelBatchResponse = zod.object({
   "beverageType": zod.enum(['SPIRITS', 'WINE', 'MALT', 'UNKNOWN']),
   "overallStatus": zod.enum(['PASS', 'FAIL', 'REVIEW']),
   "confidenceScore": zod.number().min(uploadLabelBatchResponseResultsItemConfidenceScoreMin).max(uploadLabelBatchResponseResultsItemConfidenceScoreMax),
+  "imagesAnalyzed": zod.number().min(1).describe('Number of label images analyzed (1 for front only, 2 for front + back)'),
   "brandName": zod.object({
   "extractedValue": zod.string().nullish(),
   "expectedValue": zod.string().nullish(),
@@ -293,6 +327,22 @@ export const UploadLabelBatchResponse = zod.object({
   "failReason": zod.string().nullish(),
   "isMandatory": zod.boolean().nullish()
 }),
+  "appellationOfOrigin": zod.union([zod.object({
+  "extractedValue": zod.string().nullish(),
+  "expectedValue": zod.string().nullish(),
+  "matchStatus": zod.enum(['PASS', 'FAIL', 'NEEDS_REVIEW', 'NOT_APPLICABLE']),
+  "confidence": zod.number().min(uploadLabelBatchResponseResultsItemAppellationOfOriginOneConfidenceMin).max(uploadLabelBatchResponseResultsItemAppellationOfOriginOneConfidenceMax),
+  "failReason": zod.string().nullish(),
+  "isMandatory": zod.boolean().nullish()
+}),zod.null()]).optional().describe('Wine only — appellation of origin check (27 CFR 4.23). Null for spirits and malt.'),
+  "sulfiteDeclaration": zod.union([zod.object({
+  "extractedValue": zod.string().nullish(),
+  "expectedValue": zod.string().nullish(),
+  "matchStatus": zod.enum(['PASS', 'FAIL', 'NEEDS_REVIEW', 'NOT_APPLICABLE']),
+  "confidence": zod.number().min(uploadLabelBatchResponseResultsItemSulfiteDeclarationOneConfidenceMin).max(uploadLabelBatchResponseResultsItemSulfiteDeclarationOneConfidenceMax),
+  "failReason": zod.string().nullish(),
+  "isMandatory": zod.boolean().nullish()
+}),zod.null()]).optional().describe('Wine only — sulfite declaration check (27 CFR 4.32(b)(1)). Null for spirits and malt.'),
   "flags": zod.array(zod.object({
   "field": zod.string(),
   "severity": zod.enum(['ERROR', 'WARNING', 'INFO']),
@@ -313,6 +363,7 @@ export const GetSessionResultsParams = zod.object({
 
 export const getSessionResultsResponseResultsItemConfidenceScoreMin = 0;
 export const getSessionResultsResponseResultsItemConfidenceScoreMax = 1;
+
 
 export const getSessionResultsResponseResultsItemBrandNameConfidenceMin = 0;
 export const getSessionResultsResponseResultsItemBrandNameConfidenceMax = 1;
@@ -344,6 +395,12 @@ export const getSessionResultsResponseResultsItemLabelLanguageConfidenceMax = 1;
 export const getSessionResultsResponseResultsItemProhibitedSurfaceConfidenceMin = 0;
 export const getSessionResultsResponseResultsItemProhibitedSurfaceConfidenceMax = 1;
 
+export const getSessionResultsResponseResultsItemAppellationOfOriginOneConfidenceMin = 0;
+export const getSessionResultsResponseResultsItemAppellationOfOriginOneConfidenceMax = 1;
+
+export const getSessionResultsResponseResultsItemSulfiteDeclarationOneConfidenceMin = 0;
+export const getSessionResultsResponseResultsItemSulfiteDeclarationOneConfidenceMax = 1;
+
 
 
 export const GetSessionResultsResponse = zod.object({
@@ -359,6 +416,7 @@ export const GetSessionResultsResponse = zod.object({
   "beverageType": zod.enum(['SPIRITS', 'WINE', 'MALT', 'UNKNOWN']),
   "overallStatus": zod.enum(['PASS', 'FAIL', 'REVIEW']),
   "confidenceScore": zod.number().min(getSessionResultsResponseResultsItemConfidenceScoreMin).max(getSessionResultsResponseResultsItemConfidenceScoreMax),
+  "imagesAnalyzed": zod.number().min(1).describe('Number of label images analyzed (1 for front only, 2 for front + back)'),
   "brandName": zod.object({
   "extractedValue": zod.string().nullish(),
   "expectedValue": zod.string().nullish(),
@@ -438,6 +496,22 @@ export const GetSessionResultsResponse = zod.object({
   "failReason": zod.string().nullish(),
   "isMandatory": zod.boolean().nullish()
 }),
+  "appellationOfOrigin": zod.union([zod.object({
+  "extractedValue": zod.string().nullish(),
+  "expectedValue": zod.string().nullish(),
+  "matchStatus": zod.enum(['PASS', 'FAIL', 'NEEDS_REVIEW', 'NOT_APPLICABLE']),
+  "confidence": zod.number().min(getSessionResultsResponseResultsItemAppellationOfOriginOneConfidenceMin).max(getSessionResultsResponseResultsItemAppellationOfOriginOneConfidenceMax),
+  "failReason": zod.string().nullish(),
+  "isMandatory": zod.boolean().nullish()
+}),zod.null()]).optional().describe('Wine only — appellation of origin check (27 CFR 4.23). Null for spirits and malt.'),
+  "sulfiteDeclaration": zod.union([zod.object({
+  "extractedValue": zod.string().nullish(),
+  "expectedValue": zod.string().nullish(),
+  "matchStatus": zod.enum(['PASS', 'FAIL', 'NEEDS_REVIEW', 'NOT_APPLICABLE']),
+  "confidence": zod.number().min(getSessionResultsResponseResultsItemSulfiteDeclarationOneConfidenceMin).max(getSessionResultsResponseResultsItemSulfiteDeclarationOneConfidenceMax),
+  "failReason": zod.string().nullish(),
+  "isMandatory": zod.boolean().nullish()
+}),zod.null()]).optional().describe('Wine only — sulfite declaration check (27 CFR 4.32(b)(1)). Null for spirits and malt.'),
   "flags": zod.array(zod.object({
   "field": zod.string(),
   "severity": zod.enum(['ERROR', 'WARNING', 'INFO']),
@@ -466,6 +540,7 @@ export const GetLabelResultParams = zod.object({
 
 export const getLabelResultResponseConfidenceScoreMin = 0;
 export const getLabelResultResponseConfidenceScoreMax = 1;
+
 
 export const getLabelResultResponseBrandNameConfidenceMin = 0;
 export const getLabelResultResponseBrandNameConfidenceMax = 1;
@@ -497,6 +572,12 @@ export const getLabelResultResponseLabelLanguageConfidenceMax = 1;
 export const getLabelResultResponseProhibitedSurfaceConfidenceMin = 0;
 export const getLabelResultResponseProhibitedSurfaceConfidenceMax = 1;
 
+export const getLabelResultResponseAppellationOfOriginOneConfidenceMin = 0;
+export const getLabelResultResponseAppellationOfOriginOneConfidenceMax = 1;
+
+export const getLabelResultResponseSulfiteDeclarationOneConfidenceMin = 0;
+export const getLabelResultResponseSulfiteDeclarationOneConfidenceMax = 1;
+
 
 
 export const GetLabelResultResponse = zod.object({
@@ -506,6 +587,7 @@ export const GetLabelResultResponse = zod.object({
   "beverageType": zod.enum(['SPIRITS', 'WINE', 'MALT', 'UNKNOWN']),
   "overallStatus": zod.enum(['PASS', 'FAIL', 'REVIEW']),
   "confidenceScore": zod.number().min(getLabelResultResponseConfidenceScoreMin).max(getLabelResultResponseConfidenceScoreMax),
+  "imagesAnalyzed": zod.number().min(1).describe('Number of label images analyzed (1 for front only, 2 for front + back)'),
   "brandName": zod.object({
   "extractedValue": zod.string().nullish(),
   "expectedValue": zod.string().nullish(),
@@ -585,6 +667,22 @@ export const GetLabelResultResponse = zod.object({
   "failReason": zod.string().nullish(),
   "isMandatory": zod.boolean().nullish()
 }),
+  "appellationOfOrigin": zod.union([zod.object({
+  "extractedValue": zod.string().nullish(),
+  "expectedValue": zod.string().nullish(),
+  "matchStatus": zod.enum(['PASS', 'FAIL', 'NEEDS_REVIEW', 'NOT_APPLICABLE']),
+  "confidence": zod.number().min(getLabelResultResponseAppellationOfOriginOneConfidenceMin).max(getLabelResultResponseAppellationOfOriginOneConfidenceMax),
+  "failReason": zod.string().nullish(),
+  "isMandatory": zod.boolean().nullish()
+}),zod.null()]).optional().describe('Wine only — appellation of origin check (27 CFR 4.23). Null for spirits and malt.'),
+  "sulfiteDeclaration": zod.union([zod.object({
+  "extractedValue": zod.string().nullish(),
+  "expectedValue": zod.string().nullish(),
+  "matchStatus": zod.enum(['PASS', 'FAIL', 'NEEDS_REVIEW', 'NOT_APPLICABLE']),
+  "confidence": zod.number().min(getLabelResultResponseSulfiteDeclarationOneConfidenceMin).max(getLabelResultResponseSulfiteDeclarationOneConfidenceMax),
+  "failReason": zod.string().nullish(),
+  "isMandatory": zod.boolean().nullish()
+}),zod.null()]).optional().describe('Wine only — sulfite declaration check (27 CFR 4.32(b)(1)). Null for spirits and malt.'),
   "flags": zod.array(zod.object({
   "field": zod.string(),
   "severity": zod.enum(['ERROR', 'WARNING', 'INFO']),

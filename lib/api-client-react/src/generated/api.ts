@@ -127,7 +127,9 @@ export const getUploadLabelUrl = () => {
 }
 
 /**
- * @summary Upload single label image for analysis
+ * Accepts a front label image (required) and optional back label image. When both are supplied, Claude Vision analyzes them together so fields split across front/back panels are correctly extracted.
+
+ * @summary Upload one or two label images for analysis
  */
 export const uploadLabel = async (labelUploadInput: LabelUploadInput, options?: RequestInit): Promise<LabelAnalysisResult> => {
     const formData = new FormData();
@@ -192,7 +194,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UploadLabelMutationError = ErrorType<ErrorResponse>
 
     /**
- * @summary Upload single label image for analysis
+ * @summary Upload one or two label images for analysis
  */
 export const useUploadLabel = <TError = ErrorType<ErrorResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadLabel>>, TError,{data: BodyType<LabelUploadInput>}, TContext>, request?: SecondParameter<typeof customFetch>}

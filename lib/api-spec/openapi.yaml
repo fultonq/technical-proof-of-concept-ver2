@@ -31,7 +31,11 @@ paths:
     post:
       operationId: uploadLabel
       tags: [labels]
-      summary: Upload single label image for analysis
+      summary: Upload one or two label images for analysis
+      description: >
+        Accepts a front label image (required) and optional back label image.
+        When both are supplied, Claude Vision analyzes them together so fields
+        split across front/back panels are correctly extracted.
       requestBody:
         required: true
         content:
@@ -251,6 +255,7 @@ components:
         - beverageType
         - overallStatus
         - confidenceScore
+        - imagesAnalyzed
         - brandName
         - classType
         - alcoholContent
@@ -277,6 +282,10 @@ components:
           type: number
           minimum: 0
           maximum: 1
+        imagesAnalyzed:
+          type: integer
+          minimum: 1
+          description: Number of label images analyzed (1 for front only, 2 for front + back)
         brandName:
           $ref: "#/components/schemas/FieldResult"
         classType:
@@ -301,6 +310,16 @@ components:
           $ref: "#/components/schemas/FieldResult"
         prohibitedSurface:
           $ref: "#/components/schemas/FieldResult"
+        appellationOfOrigin:
+          description: Wine only — appellation of origin check (27 CFR 4.23). Null for spirits and malt.
+          oneOf:
+            - $ref: "#/components/schemas/FieldResult"
+            - type: "null"
+        sulfiteDeclaration:
+          description: Wine only — sulfite declaration check (27 CFR 4.32(b)(1)). Null for spirits and malt.
+          oneOf:
+            - $ref: "#/components/schemas/FieldResult"
+            - type: "null"
         flags:
           type: array
           items:

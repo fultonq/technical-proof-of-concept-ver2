@@ -33,6 +33,7 @@ export interface LabelAnalysisResult {
   beverageType: BeverageType;
   overallStatus: OverallStatus;
   confidenceScore: number;
+  imagesAnalyzed: number;
   brandName: FieldResult;
   classType: FieldResult;
   alcoholContent: FieldResult;
@@ -43,6 +44,9 @@ export interface LabelAnalysisResult {
   sameFieldOfVision: SameFieldOfVisionResult | null;
   labelLanguage: FieldResult;
   prohibitedSurface: FieldResult;
+  // Wine-specific fields (null for SPIRITS/MALT)
+  appellationOfOrigin: FieldResult | null;
+  sulfiteDeclaration: FieldResult | null;
   flags: ComplianceFlag[];
   processingMs: number;
   analyzedAt: string;
@@ -88,5 +92,8 @@ export interface ClaudeExtractionResult {
     confidence: number;
     details: string | null;
   };
+  // Wine-specific extraction fields (null/undefined for SPIRITS/MALT)
+  appellationOfOrigin: (ClaudeFieldExtraction & { isMandatory: boolean }) | null;
+  sulfiteDeclaration: (ClaudeFieldExtraction & { found: boolean }) | null;
   overallConfidence: number;
 }

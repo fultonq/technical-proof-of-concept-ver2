@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { extractLabelFields } from "./claude-vision.js";
+import { extractLabelFields, type LabelImage } from "./claude-vision.js";
 import { runComplianceChecks } from "./compliance-engine.js";
 import { addToSession } from "./session-store.js";
 import type { LabelAnalysisResult } from "./label-types.js";
@@ -14,33 +14,36 @@ export interface AnalyzeOptions {
 
 // Orchestrates a single label analysis: AI extraction → compliance checks → session storage.
 //
+// Accepts one or two images (front label, or front + back label). When two images are
+// supplied, both are sent to Claude Vision in a single message so Claude can extract
+// fields from across both panels (e.g. government warning on back, brand name on front).
+//
 // Expected value fields are all optional:
-//   - expectedBrandName    — fuzzy-matched against the extracted brand name
-//   - expectedClassType    — stored on the result for UI display; NOT compared against label text
-//   - expectedAlcoholContent — loose string match (case-insensitive, whitespace-stripped)
-//   - expectedNetContents  — stored on the result for UI display; NOT compared against label text
+//   - expectedBrandName       — fuzzy-matched against extracted brand name
+//   - expectedClassType       — stored for display; NOT compared against label text
+//   - expectedAlcoholContent  — loose string match (case-insensitive, whitespace-stripped)
+//   - expectedNetContents     — stored for display; NOT compared against label text
 //
-// If extraction fails (Claude API error, malformed JSON response, etc.), a fallback result
-// is returned with every field set to NEEDS_REVIEW and a single ERROR flag. The fallback
-// ensures the session still receives an entry and the UI can show a meaningful error state
-// rather than crashing.
+// If extraction fails a fallback result is returned with every field NEEDS_REVIEW and
+// a single ERROR flag. This ensures the session always gets an entry and the UI can
+// show a meaningful error state rather than crashing.
 //
-// MAINTENANCE NOTE: The fallback result object below is a manual replica of the full
-// LabelAnalysisResult shape. If a new required field is added to LabelAnalysisResult,
-// the fallback must be updated here too — TypeScript will catch it at compile time.
+// MAINTENANCE NOTE: The fallback result below is a manual replica of the full
+// LabelAnalysisResult shape. If a new required field is added, update it here too —
+// TypeScript will catch omissions at compile time.
 export async function analyzeLabel(
-  fileBuffer: Buffer,
+  images: LabelImage[],
   fileName: string,
-  mimeType: string,
   options: AnalyzeOptions = {},
 ): Promise<LabelAnalysisResult> {
   const startMs = Date.now();
   const labelId = uuidv4();
   const sessionId = options.sessionId ?? uuidv4();
+  const imagesAnalyzed = images.length;
 
   let extraction;
   try {
-    extraction = await extractLabelFields(fileBuffer, mimeType);
+    extraction = await extractLabelFields(images);
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     const fallbackResult: LabelAnalysisResult = {
@@ -50,6 +53,7 @@ export async function analyzeLabel(
       beverageType: "UNKNOWN",
       overallStatus: "REVIEW",
       confidenceScore: 0,
+      imagesAnalyzed,
       brandName: { extractedValue: null, expectedValue: options.expectedBrandName ?? null, matchStatus: "NEEDS_REVIEW", confidence: 0, failReason: "AI extraction failed", isMandatory: true },
       classType: { extractedValue: null, expectedValue: null, matchStatus: "NEEDS_REVIEW", confidence: 0, failReason: "AI extraction failed", isMandatory: true },
       alcoholContent: { extractedValue: null, expectedValue: null, matchStatus: "NEEDS_REVIEW", confidence: 0, failReason: "AI extraction failed", isMandatory: null },
@@ -60,6 +64,8 @@ export async function analyzeLabel(
       sameFieldOfVision: null,
       labelLanguage: { extractedValue: null, expectedValue: "English", matchStatus: "NEEDS_REVIEW", confidence: 0, failReason: "AI extraction failed", isMandatory: true },
       prohibitedSurface: { extractedValue: null, expectedValue: null, matchStatus: "NEEDS_REVIEW", confidence: 0, failReason: "AI extraction failed", isMandatory: null },
+      appellationOfOrigin: null,
+      sulfiteDeclaration: null,
       flags: [{ field: "extraction", severity: "ERROR", message: `AI extraction failed: ${errorMsg}` }],
       processingMs: Date.now() - startMs,
       analyzedAt: new Date().toISOString(),
@@ -82,6 +88,7 @@ export async function analyzeLabel(
     beverageType: compliance.beverageType,
     overallStatus: compliance.overallStatus,
     confidenceScore: extraction.overallConfidence,
+    imagesAnalyzed,
     brandName: compliance.brandName,
     classType: compliance.classType,
     alcoholContent: compliance.alcoholContent,
@@ -92,6 +99,8 @@ export async function analyzeLabel(
     sameFieldOfVision: compliance.sameFieldOfVision,
     labelLanguage: compliance.labelLanguage,
     prohibitedSurface: compliance.prohibitedSurface,
+    appellationOfOrigin: compliance.appellationOfOrigin,
+    sulfiteDeclaration: compliance.sulfiteDeclaration,
     flags: compliance.flags,
     processingMs: Date.now() - startMs,
     analyzedAt: new Date().toISOString(),
@@ -101,7 +110,7 @@ export async function analyzeLabel(
   return result;
 }
 
-// Aggregates per-label results for a session into a summary suitable for the results page.
+// Aggregates per-label results for a session into a batch summary.
 // passCount + failCount + reviewCount always equals totalCount.
 export function buildBatchSummary(
   sessionId: string,

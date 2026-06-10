@@ -116,6 +116,11 @@ export interface LabelAnalysisResult {
      * @maximum 1
      */
   confidenceScore: number;
+  /**
+     * Number of label images analyzed (1 for front only, 2 for front + back)
+     * @minimum 1
+     */
+  imagesAnalyzed: number;
   brandName: FieldResult;
   classType: FieldResult;
   alcoholContent: FieldResult;
@@ -126,6 +131,10 @@ export interface LabelAnalysisResult {
   sameFieldOfVision?: SameFieldOfVisionResult | null;
   labelLanguage: FieldResult;
   prohibitedSurface: FieldResult;
+  /** Wine only — appellation of origin check (27 CFR 4.23). Null for spirits and malt. */
+  appellationOfOrigin?: FieldResult | null;
+  /** Wine only — sulfite declaration check (27 CFR 4.32(b)(1)). Null for spirits and malt. */
+  sulfiteDeclaration?: FieldResult | null;
   flags: ComplianceFlag[];
   processingMs: number;
   analyzedAt: string;

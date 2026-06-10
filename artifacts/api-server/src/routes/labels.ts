@@ -5,6 +5,7 @@ import { analyzeLabel, buildBatchSummary } from "../lib/label-analyzer.js";
 import { getLabelById, getSession, deleteSession } from "../lib/session-store.js";
 import { batchProcess } from "@workspace/integrations-anthropic-ai/batch";
 import { generateLabelSvg } from "../lib/label-generator.js";
+import type { LabelImage } from "../lib/claude-vision.js";
 
 const router: IRouter = Router();
 
@@ -23,11 +24,23 @@ const upload = multer({
   },
 });
 
+// Accepts:
+//   field "file"     — front label image (required)
+//   field "backFile" — back label image (optional)
+// When backFile is supplied, both images are sent to Claude Vision in one message so
+// fields split across front/back panels (e.g. gov warning on back) are extracted correctly.
 router.post(
   "/v1/labels/upload",
-  upload.single("file"),
+  upload.fields([
+    { name: "file", maxCount: 1 },
+    { name: "backFile", maxCount: 1 },
+  ]),
   async (req, res) => {
-    if (!req.file) {
+    const filesMap = req.files as Record<string, Express.Multer.File[]> | undefined;
+    const frontFile = filesMap?.["file"]?.[0];
+    const backFile = filesMap?.["backFile"]?.[0];
+
+    if (!frontFile) {
       res.status(400).json({ error: "No file uploaded. Provide a JPEG, PNG, or WEBP image." });
       return;
     }
@@ -38,13 +51,25 @@ router.post(
     const expectedAlcoholContent = (req.body as Record<string, string>).expectedAlcoholContent ?? null;
     const expectedNetContents = (req.body as Record<string, string>).expectedNetContents ?? null;
 
+    const images: LabelImage[] = [
+      { buffer: frontFile.buffer, mimeType: frontFile.mimetype },
+    ];
+    if (backFile) {
+      images.push({ buffer: backFile.buffer, mimeType: backFile.mimetype });
+    }
+
+    const fileName = backFile
+      ? `${frontFile.originalname} + ${backFile.originalname}`
+      : frontFile.originalname;
+
     try {
-      const result = await analyzeLabel(
-        req.file.buffer,
-        req.file.originalname,
-        req.file.mimetype,
-        { sessionId, expectedBrandName, expectedClassType, expectedAlcoholContent, expectedNetContents },
-      );
+      const result = await analyzeLabel(images, fileName, {
+        sessionId,
+        expectedBrandName,
+        expectedClassType,
+        expectedAlcoholContent,
+        expectedNetContents,
+      });
       res.json(result);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -69,7 +94,11 @@ router.post(
       const results = await batchProcess(
         files,
         async (file) => {
-          return analyzeLabel(file.buffer, file.originalname, file.mimetype, { sessionId });
+          return analyzeLabel(
+            [{ buffer: file.buffer, mimeType: file.mimetype }],
+            file.originalname,
+            { sessionId },
+          );
         },
         { concurrency: 2, retries: 3 },
       );

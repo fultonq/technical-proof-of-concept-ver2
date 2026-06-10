@@ -4,7 +4,7 @@ import { useGetLabelResult, getGetLabelResultQueryKey } from "@workspace/api-cli
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ConfidenceBar } from "@/components/ui/confidence-bar";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, AlertTriangle, Info, CheckCircle2, XCircle, Clock, Loader2, AlertCircle, ChevronDown, ChevronUp, Wrench } from "lucide-react";
+import { ArrowLeft, AlertTriangle, Info, CheckCircle2, XCircle, Clock, Loader2, AlertCircle, ChevronDown, ChevronUp, Wrench, Images } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { getCorrections } from "@/lib/corrections";
@@ -15,15 +15,27 @@ function FlagIcon({ severity }: { severity: string }) {
   return <Info className="w-5 h-5 text-blue-500 shrink-0" />;
 }
 
+// Human-readable labels for each field key. Used in the field table header column.
 const FIELD_LABELS: Record<string, string> = {
   brandName: "Brand Name",
   classType: "Type of Beverage",
   alcoholContent: "Alcohol Content (ABV)",
-  netContents: "Bottle Size",
+  netContents: "Bottle / Package Size",
   bottlerProducer: "Bottler / Producer",
   countryOfOrigin: "Country of Origin",
   labelLanguage: "Label Language",
   prohibitedSurface: "Prohibited Content",
+  // Wine-specific
+  appellationOfOrigin: "Appellation of Origin",
+  sulfiteDeclaration: "Sulfite Declaration",
+};
+
+// Human-readable beverage type names for the breadcrumb / info line.
+const BEVERAGE_TYPE_LABELS: Record<string, string> = {
+  SPIRITS: "Distilled Spirits (27 CFR Part 5)",
+  WINE: "Wine (27 CFR Part 4)",
+  MALT: "Beer / Malt Beverage (27 CFR Part 7)",
+  UNKNOWN: "Unknown Beverage Type",
 };
 
 export default function LabelDetailPage() {
@@ -63,12 +75,13 @@ export default function LabelDetailPage() {
 
   const status = result.overallStatus;
   const flagCount = result.flags.filter(f => f.severity === "ERROR").length;
+  const isWine = result.beverageType === "WINE";
 
-  // Collect every field key that has a FAIL or NEEDS_REVIEW status
+  // Collect every field key that has FAIL or NEEDS_REVIEW status for the corrections panel.
   const failingFieldKeys: string[] = [];
-  const fieldKeys = ["brandName","classType","alcoholContent","netContents","governmentWarning","bottlerProducer","countryOfOrigin","labelLanguage","prohibitedSurface"] as const;
-  for (const key of fieldKeys) {
-    const field = result[key] as any;
+  const coreFieldKeys = ["brandName","classType","alcoholContent","netContents","bottlerProducer","countryOfOrigin","labelLanguage","prohibitedSurface"] as const;
+  for (const key of coreFieldKeys) {
+    const field = result[key as keyof typeof result] as any;
     if (field && (field.matchStatus === "FAIL" || field.matchStatus === "NEEDS_REVIEW")) {
       failingFieldKeys.push(key);
     }
@@ -76,7 +89,21 @@ export default function LabelDetailPage() {
   if (result.sameFieldOfVision && !result.sameFieldOfVision.compliant) {
     failingFieldKeys.push("sameFieldOfVision");
   }
+  if (isWine) {
+    if (result.appellationOfOrigin && (result.appellationOfOrigin.matchStatus === "FAIL" || result.appellationOfOrigin.matchStatus === "NEEDS_REVIEW")) {
+      failingFieldKeys.push("appellationOfOrigin");
+    }
+    if (result.sulfiteDeclaration && (result.sulfiteDeclaration.matchStatus === "FAIL" || result.sulfiteDeclaration.matchStatus === "NEEDS_REVIEW")) {
+      failingFieldKeys.push("sulfiteDeclaration");
+    }
+  }
   const corrections = getCorrections(failingFieldKeys);
+
+  // All core field rows to render in the table (wine-specific appended when appropriate)
+  const tableFieldKeys: string[] = [
+    "brandName","classType","alcoholContent","netContents","bottlerProducer","countryOfOrigin","labelLanguage","prohibitedSurface",
+    ...(isWine ? ["appellationOfOrigin","sulfiteDeclaration"] : []),
+  ];
 
   return (
     <div className="flex-1 flex flex-col pb-20">
@@ -130,9 +157,16 @@ export default function LabelDetailPage() {
             <span>/</span>
             <span className="truncate max-w-[200px] text-foreground font-medium">{result.fileName}</span>
           </div>
-          <p className="text-sm text-muted-foreground">
-            Beverage type: <strong>{result.beverageType}</strong> &nbsp;·&nbsp; Checked in {(result.processingMs / 1000).toFixed(1)}s
-          </p>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+            <span>Beverage type: <strong className="text-foreground">{BEVERAGE_TYPE_LABELS[result.beverageType] ?? result.beverageType}</strong></span>
+            <span className="text-border">·</span>
+            <span className="flex items-center gap-1">
+              <Images className="w-3.5 h-3.5" />
+              {(result.imagesAnalyzed ?? 1) === 2 ? "2 images (front + back)" : "1 image"}
+            </span>
+            <span className="text-border">·</span>
+            <span>Checked in {(result.processingMs / 1000).toFixed(1)}s</span>
+          </div>
         </div>
       </div>
 
@@ -149,20 +183,23 @@ export default function LabelDetailPage() {
               <CardDescription className="text-base">Each required field and whether it passed the check.</CardDescription>
             </CardHeader>
             <CardContent className="p-0">
-              {/* Column headers */}
               <div className="grid grid-cols-12 gap-2 px-5 py-3 border-b border-border/50 bg-muted/30">
                 <div className="col-span-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">Field</div>
                 <div className="col-span-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">Found on label</div>
                 <div className="col-span-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">Result</div>
               </div>
-              {(["brandName","classType","alcoholContent","netContents","bottlerProducer","countryOfOrigin","labelLanguage","prohibitedSurface"] as const).map((key) => {
-                const field = result[key as keyof typeof result] as any;
+              {tableFieldKeys.map((key) => {
+                const field = (result as any)[key];
                 if (!field || typeof field !== "object" || !("matchStatus" in field)) return null;
+                if (field.matchStatus === "NOT_APPLICABLE") return null;
                 return (
                   <div key={key} className="grid grid-cols-12 gap-2 px-5 py-4 border-b border-border last:border-0 hover:bg-secondary/10 transition-colors items-start">
                     <div className="col-span-4">
                       <span className="font-semibold text-base text-foreground">{FIELD_LABELS[key] ?? key}</span>
                       {field.isMandatory && <span className="ml-2 text-[10px] uppercase font-bold text-destructive bg-destructive/10 px-1.5 py-0.5 rounded">Required</span>}
+                      {(key === "appellationOfOrigin" || key === "sulfiteDeclaration") && (
+                        <span className="ml-1 text-[10px] uppercase font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">Wine</span>
+                      )}
                     </div>
                     <div className="col-span-4 font-mono text-sm break-words text-foreground">
                       {field.extractedValue || <span className="text-muted-foreground italic">Not found</span>}
@@ -216,13 +253,15 @@ export default function LabelDetailPage() {
             </CardContent>
           </Card>
 
-          {/* Same Field of Vision */}
+          {/* Same Field of Vision — SPIRITS ONLY */}
           {result.sameFieldOfVision && (
             <Card className="shadow-sm">
               <CardHeader className="border-b border-border bg-secondary/30 pb-4 flex flex-row items-center justify-between">
                 <div>
                   <CardTitle className="text-xl">Panel Layout Check</CardTitle>
-                  <CardDescription className="text-base">Key fields must appear together on the same side of the label.</CardDescription>
+                  <CardDescription className="text-base">
+                    For distilled spirits, the brand name, ABV, and type designation must appear on the same label panel (27 CFR 5.64).
+                  </CardDescription>
                 </div>
                 <StatusBadge status={result.sameFieldOfVision.compliant ? "PASS" : "FAIL"} className="text-sm px-3 py-1 shrink-0" />
               </CardHeader>
@@ -238,12 +277,59 @@ export default function LabelDetailPage() {
                 {result.sameFieldOfVision.singleImageWarning && (
                   <Alert className="bg-review/5 border-review/20">
                     <Info className="h-5 w-5 text-review" />
-                    <AlertTitle className="text-base font-bold text-review">Only one image provided</AlertTitle>
+                    <AlertTitle className="text-base font-bold text-review">Only one label image provided</AlertTitle>
                     <AlertDescription className="text-base">
-                      To fully verify this requirement, upload photos of all sides of the label.
+                      To fully verify this requirement, upload photos of both the front and back label panels.
                     </AlertDescription>
                   </Alert>
                 )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Wine-specific notice */}
+          {isWine && (
+            <Card className="shadow-sm border-primary/20">
+              <CardHeader className="border-b border-border bg-primary/5 pb-4">
+                <CardTitle className="text-xl text-primary">Wine-Specific Requirements</CardTitle>
+                <CardDescription className="text-base">
+                  Additional checks that apply under 27 CFR Part 4.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-5 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {result.appellationOfOrigin && result.appellationOfOrigin.matchStatus !== "NOT_APPLICABLE" && (
+                    <div className="bg-secondary/20 rounded-lg p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="font-semibold text-base">Appellation of Origin</p>
+                        <StatusBadge status={result.appellationOfOrigin.matchStatus} />
+                      </div>
+                      <p className="font-mono text-sm text-foreground">
+                        {result.appellationOfOrigin.extractedValue || <span className="text-muted-foreground italic">Not found</span>}
+                      </p>
+                      {result.appellationOfOrigin.failReason && (
+                        <p className="text-sm text-fail">{result.appellationOfOrigin.failReason}</p>
+                      )}
+                    </div>
+                  )}
+                  {result.sulfiteDeclaration && result.sulfiteDeclaration.matchStatus !== "NOT_APPLICABLE" && (
+                    <div className="bg-secondary/20 rounded-lg p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="font-semibold text-base">Sulfite Declaration</p>
+                        <StatusBadge status={result.sulfiteDeclaration.matchStatus} />
+                      </div>
+                      <p className="font-mono text-sm text-foreground">
+                        {result.sulfiteDeclaration.extractedValue || <span className="text-muted-foreground italic">Not found</span>}
+                      </p>
+                      {result.sulfiteDeclaration.failReason && (
+                        <p className="text-sm text-review">{result.sulfiteDeclaration.failReason}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Country of origin is always required for wine labels — even domestic wines must state the country (27 CFR 4.32(a)(3)).
+                </p>
               </CardContent>
             </Card>
           )}
@@ -275,7 +361,7 @@ export default function LabelDetailPage() {
                     <div key={i} className="p-4 flex gap-3">
                       <FlagIcon severity={flag.severity} />
                       <div>
-                        <p className="font-bold text-base text-foreground mb-0.5">{flag.field}</p>
+                        <p className="font-bold text-base text-foreground mb-0.5">{FIELD_LABELS[flag.field] ?? flag.field}</p>
                         <p className="text-base text-muted-foreground leading-snug">{flag.message}</p>
                       </div>
                     </div>
@@ -285,7 +371,7 @@ export default function LabelDetailPage() {
             </CardContent>
           </Card>
 
-          {/* Recommended corrections — only shown when there are failures */}
+          {/* How to Fix This */}
           {corrections.length > 0 && (
             <Card className="shadow-sm border-t-4 border-t-review">
               <CardHeader className="border-b border-border pb-3">
