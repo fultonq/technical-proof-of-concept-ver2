@@ -1,12 +1,13 @@
-import React from "react";
+import React, { useState } from "react";
 import { useRoute, Link } from "wouter";
 import { useGetLabelResult, getGetLabelResultQueryKey } from "@workspace/api-client-react";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ConfidenceBar } from "@/components/ui/confidence-bar";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, AlertTriangle, Info, CheckCircle2, XCircle, Clock, Loader2, AlertCircle } from "lucide-react";
+import { ArrowLeft, AlertTriangle, Info, CheckCircle2, XCircle, Clock, Loader2, AlertCircle, ChevronDown, ChevronUp, Wrench } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { getCorrections } from "@/lib/corrections";
 
 function FlagIcon({ severity }: { severity: string }) {
   if (severity === "ERROR") return <AlertCircle className="w-5 h-5 text-fail shrink-0" />;
@@ -58,8 +59,24 @@ export default function LabelDetailPage() {
     );
   }
 
+  const [expandedCorrection, setExpandedCorrection] = useState<string | null>(null);
+
   const status = result.overallStatus;
   const flagCount = result.flags.filter(f => f.severity === "ERROR").length;
+
+  // Collect every field key that has a FAIL or NEEDS_REVIEW status
+  const failingFieldKeys: string[] = [];
+  const fieldKeys = ["brandName","classType","alcoholContent","netContents","governmentWarning","bottlerProducer","countryOfOrigin","labelLanguage","prohibitedSurface"] as const;
+  for (const key of fieldKeys) {
+    const field = result[key] as any;
+    if (field && (field.matchStatus === "FAIL" || field.matchStatus === "NEEDS_REVIEW")) {
+      failingFieldKeys.push(key);
+    }
+  }
+  if (result.sameFieldOfVision && !result.sameFieldOfVision.compliant) {
+    failingFieldKeys.push("sameFieldOfVision");
+  }
+  const corrections = getCorrections(failingFieldKeys);
 
   return (
     <div className="flex-1 flex flex-col pb-20">
@@ -267,6 +284,55 @@ export default function LabelDetailPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* Recommended corrections — only shown when there are failures */}
+          {corrections.length > 0 && (
+            <Card className="shadow-sm border-t-4 border-t-review">
+              <CardHeader className="border-b border-border pb-3">
+                <CardTitle className="text-xl flex items-center gap-2">
+                  <Wrench className="w-5 h-5 text-review" />
+                  How to Fix This
+                </CardTitle>
+                <CardDescription className="text-base">
+                  Step-by-step corrections for each problem found.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="divide-y divide-border">
+                  {corrections.map(({ key, guide }) => {
+                    const isOpen = expandedCorrection === key;
+                    return (
+                      <div key={key}>
+                        <button
+                          className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-secondary/20 transition-colors"
+                          onClick={() => setExpandedCorrection(isOpen ? null : key)}
+                        >
+                          <span className="font-bold text-base text-foreground">{guide.title}</span>
+                          {isOpen
+                            ? <ChevronUp className="w-5 h-5 text-muted-foreground shrink-0" />
+                            : <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />}
+                        </button>
+                        {isOpen && (
+                          <div className="px-5 pb-5 bg-secondary/10">
+                            <ol className="space-y-3 list-none">
+                              {guide.steps.map((step, i) => (
+                                <li key={i} className="flex gap-3 items-start">
+                                  <span className="shrink-0 w-7 h-7 rounded-full bg-review/20 text-review font-black text-sm flex items-center justify-center mt-0.5">
+                                    {i + 1}
+                                  </span>
+                                  <p className="text-base text-foreground leading-relaxed">{step}</p>
+                                </li>
+                              ))}
+                            </ol>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Actions */}
           <Card className="shadow-sm">
