@@ -44,6 +44,107 @@ Open the project in Replit — both workflows start automatically. No configurat
 
 ---
 
+## Project Structure
+
+```
+ttb-label-review/                   ← repo root
+│
+├── README.md                       ← this file
+├── package.json                    ← root dev tooling (TypeScript, ESLint, Vitest)
+├── pnpm-workspace.yaml             ← workspace package discovery + catalog pins
+├── tsconfig.json                   ← solution file referencing all composite libs
+├── tsconfig.base.json              ← shared strict TypeScript defaults
+│
+├── artifacts/                      ← deployable applications
+│   │
+│   ├── api-server/                 ← Express 5 REST API (port $PORT, default 8080)
+│   │   ├── build.mjs               ← esbuild bundler config (bundles to ESM CJS-compat)
+│   │   ├── package.json
+│   │   └── src/
+│   │       ├── index.ts            ← entry point: reads PORT, starts HTTP server
+│   │       ├── app.ts              ← Express app factory: CORS, JSON, routes, 404/error handlers
+│   │       ├── lib/
+│   │       │   ├── label-types.ts      ← all TypeScript interfaces (LabelAnalysisResult,
+│   │       │   │                         FieldResult, ComplianceFlag, ClaudeExtractionResult…)
+│   │       │   ├── claude-vision.ts    ← sends image to Claude via Anthropic SDK;
+│   │       │   │                         structured prompt returns ClaudeExtractionResult JSON
+│   │       │   ├── compliance-engine.ts← field-by-field compliance checks (Gov Warning exact
+│   │       │   │                         match, brand fuzzy match, conditional ABV, etc.)
+│   │       │   ├── label-analyzer.ts   ← orchestrator: calls claude-vision → compliance-engine
+│   │       │   │                         → assembles LabelAnalysisResult with PASS/FAIL/REVIEW
+│   │       │   ├── session-store.ts    ← in-memory Map<sessionId, LabelAnalysisResult[]>;
+│   │       │   │                         CRUD helpers (add, get, delete)
+│   │       │   └── logger.ts           ← pino logger singleton
+│   │       └── routes/
+│   │           ├── index.ts            ← mounts health + labels routers
+│   │           ├── health.ts           ← GET /api/v1/health — liveness probe
+│   │           └── labels.ts           ← all label endpoints (multer file handling,
+│   │                                     upload, batch, session, label, delete)
+│   │
+│   └── ttb-label-review/           ← React + Vite frontend (port $PORT, default 25257)
+│       ├── vite.config.ts          ← Vite config: BASE_URL from env, path alias @/ → src/
+│       ├── tailwind.config.ts      ← Tailwind config: custom colors (pass/fail/review/primary)
+│       ├── package.json
+│       └── src/
+│           ├── main.tsx            ← React entry: mounts <App /> into #root
+│           ├── App.tsx             ← Root component: QueryClientProvider, WouterRouter,
+│           │                         header bar, route declarations
+│           ├── index.css           ← Tailwind base + CSS custom properties (government-blue
+│           │                         theme, pass/fail/review color tokens)
+│           ├── pages/
+│           │   ├── upload.tsx      ← Upload page (/): drag-and-drop, single/batch tabs,
+│           │   │                     optional expectedBrandName field, sequential queue
+│           │   ├── results.tsx     ← Session dashboard (/results/:sessionId): summary bar,
+│           │   │                     searchable table, CSV export
+│           │   ├── label-detail.tsx← Label detail (/results/:sessionId/:labelId):
+│           │   │                     per-field breakdown, Gov Warning side-by-side,
+│           │   │                     SFOV panel, compliance flags, evaluator actions
+│           │   └── not-found.tsx   ← 404 fallback
+│           ├── components/ui/
+│           │   ├── status-badge.tsx← <StatusBadge status="PASS|FAIL|REVIEW|…" />
+│           │   │                     enforces PASS=green, FAIL=red, REVIEW=amber
+│           │   ├── confidence-bar.tsx ← <ConfidenceBar score={0.0–1.0} /> numeric + bar
+│           │   └── …               ← shadcn/ui primitives (button, card, table, alert,
+│           │                         tabs, input, badge, toast, etc.)
+│           ├── lib/
+│           │   ├── csv-export.ts   ← client-side CSV generator; triggers browser download
+│           │   └── utils.ts        ← cn() Tailwind class merger utility
+│           └── hooks/
+│               ├── use-toast.ts    ← toast notification state hook
+│               └── use-mobile.tsx  ← responsive breakpoint hook
+│
+└── lib/                            ← shared workspace libraries (composite, emit declarations)
+    │
+    ├── api-spec/                   ← source of truth for the API contract
+    │   ├── openapi.yaml            ← OpenAPI 3.1 spec: all endpoints, request/response schemas
+    │   └── orval.config.ts         ← Orval codegen config: generates api-client-react
+    │                                 and api-zod from openapi.yaml
+    │
+    ├── api-client-react/           ← generated React Query hooks (do not edit by hand)
+    │   └── src/
+    │       ├── generated/
+    │       │   ├── api.ts          ← useUploadLabel, useGetSessionResults, useGetLabelResult,
+    │       │   │                     useDeleteSession mutations + queries
+    │       │   └── api.schemas.ts  ← TypeScript types mirroring OpenAPI schemas
+    │       ├── custom-fetch.ts     ← fetch wrapper that reads BASE_URL from env
+    │       └── index.ts            ← barrel export
+    │
+    ├── api-zod/                    ← generated Zod validation schemas (do not edit by hand)
+    │   └── src/generated/
+    │       ├── api.ts              ← Zod schemas for each endpoint (used server-side)
+    │       └── types/              ← per-type Zod schemas (LabelAnalysisResult, etc.)
+    │
+    └── integrations-anthropic-ai/  ← Anthropic SDK wrapper
+        └── src/
+            ├── client.ts           ← initializes Anthropic client from env vars
+            │                         (AI_INTEGRATIONS_ANTHROPIC_BASE_URL + API_KEY)
+            ├── index.ts            ← exports { anthropic } singleton
+            └── batch/
+                ├── index.ts        ← batchProcess(): runs array of tasks with
+                │                     concurrency limiting and retry logic
+                └── utils.ts        ← retry helpers (p-retry), concurrency (p-limit)
+```
+
 ## Architecture
 
 ```

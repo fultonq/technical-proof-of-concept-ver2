@@ -11,3 +11,9 @@ id = "9uKUrz1xhesfqhVGvUwA3"
 uri = "file://attached_assets/old-tom-distillery-label.png"
 type = "image"
 title = "Old Tom Distillery — Sample TTB Label"
+
+[[outputs]]
+id = "3pZY2upwVNSKNHTDjpgJR"
+uri = "file://README.md"
+type = "text"
+title = "README.md — Full Submission Documentation"
