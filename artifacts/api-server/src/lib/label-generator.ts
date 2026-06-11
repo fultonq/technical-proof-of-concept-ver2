@@ -20,7 +20,7 @@ From the input text (which may be in ANY format — free-form, "Field: Value" pa
 
 • BRAND NAME — The brand or product name. The most prominent identity element (e.g. "OLD TOM DISTILLERY", "Maker's Mark", "Napa Valley Reserve"). NOT the producer address, NOT the class/type.
 • CLASS/TYPE — The product category designation (e.g. "Kentucky Straight Bourbon Whiskey", "Chardonnay", "American Lager", "Blended Scotch Whisky", "Table Wine", "Vodka").
-• ALCOHOL CONTENT — ABV percentage with unit and/or proof (e.g. "45% Alc./Vol.", "40% alc./vol. (80 Proof)", "13.5% alc/vol", "6% alcohol by volume").
+• ALCOHOL CONTENT — ABV percentage with unit and/or proof. Many formats are valid: "45% Alc./Vol.", "40% alc./vol. (80 Proof)", "13.5% alc/vol", "6% alcohol by volume", "40% ABV", "38% vol", "40 percent alcohol". Any number followed by %, ABV, alc, vol, or proof qualifies.
 • NET CONTENTS — Volume with units (e.g. "750 mL", "12 fl oz", "1.75 L", "500ml").
 • BOTTLER/PRODUCER — Name and full address of bottler, brewer, producer, or packer (e.g. "Bottled by Jack Daniel Distillery, Lynchburg, TN 37352").
 • COUNTRY OF ORIGIN — Country name if present (e.g. "Product of Scotland", "Imported from France", "United States").

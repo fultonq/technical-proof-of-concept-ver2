@@ -219,11 +219,22 @@ export function rowToLabelText(row: CsvLabelRow): string {
   }
 
   // ── Country of origin ────────────────────────────────────────────────────
-  // Wine: always required (even domestic). Spirits/Malt: only when imported.
-  if (row.isImported && row.countryOfOrigin) {
-    lines.push(`Imported from ${row.countryOfOrigin}`);
+  // Wine: always required (even domestic). Spirits/Malt: required when non-US.
+  //
+  // The `isImported` CSV flag is optional and often absent. Any non-US country
+  // value signals a foreign product regardless of that flag, so we always
+  // include country-of-origin text when a non-US value is present. This ensures
+  // Claude Vision can extract it from the generated SVG and the compliance engine
+  // correctly evaluates it rather than assuming a domestic product.
+  const countryRaw = row.countryOfOrigin.trim();
+  const isDomesticCountry = !countryRaw || /^(us|usa|united\s+states?)$/i.test(countryRaw);
+
+  if (!isDomesticCountry) {
+    // "Product of Scotland" / "Product of France" is the standard TTB format
+    // for country-of-origin declarations on imported spirit and malt labels.
+    lines.push(`Product of ${countryRaw}`);
   } else if (isWine) {
-    lines.push(`Country of Origin: ${row.countryOfOrigin || "United States"}`);
+    lines.push(`Country of Origin: ${countryRaw || "United States"}`);
   }
 
   // ── Wine-specific fields ─────────────────────────────────────────────────

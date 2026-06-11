@@ -31,7 +31,7 @@ Return ONLY a valid JSON object (no markdown, no code blocks, just raw JSON) wit
     "confidence": <0.0-1.0>
   },
   "alcoholContent": {
-    "value": "<ABV and/or proof text e.g. '40% Alc./Vol. (80 Proof)', '13.5% alc/vol', or null>",
+    "value": "<ABV and/or proof text — accept any format: '40% Alc./Vol. (80 Proof)', '13.5% alc/vol', '40% ABV', '38% vol', '6% alcohol by volume', '80 Proof', or null>",
     "confidence": <0.0-1.0>,
     "isMandatory": <true if SPIRITS or WINE ≥7% ABV; false if MALT beverage with standard fermentation>
   },
