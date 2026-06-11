@@ -99,14 +99,14 @@ function matchBrandName(
 // Government Warning verbatim check.
 // Validates three distinct failure modes:
 //   1. MISSING — statement absent entirely → FAIL
-//   2. PREFIX CAPITALISATION — "GOVERNMENT WARNING:" not ALL CAPS → FAIL (27 CFR 16.21)
-//   3. TEXT MISMATCH — body text differs from statutory wording (case-insensitive) → FAIL
-//   4. PROHIBITED LOCATION — warning on bottom/cap/foil → FAIL (27 CFR 7.61)
-// Multiple flags can be pushed in one call (e.g. wrong prefix AND wrong location).
+//   2. TEXT MISMATCH — body text differs from statutory wording (case-insensitive) → FAIL
+//   3. PROHIBITED LOCATION — warning on bottom/cap/foil → FAIL (27 CFR 7.61)
+// Multiple flags can be pushed in one call.
 //
-// CASING NOTE: 27 CFR 16.21 only requires the "GOVERNMENT WARNING:" prefix in ALL CAPS.
-// The body text may appear in any case (all-caps, mixed, lowercase) and still comply.
-// The TTB's own sample labels show the body in ALL CAPS — we must not FAIL for that.
+// CASING NOTE: The "GOVERNMENT WARNING:" prefix may appear in any capitalisation
+// (all-caps, title case, mixed, bold, etc.) — we do NOT fail for prefix casing.
+// Only the CONTENTS of the warning must match the statutory text of 27 CFR 16.21.
+// The body text may also appear in any case (all-caps, mixed, lowercase) and still comply.
 //
 // SULFITE STRIP NOTE: Labels often print CONTAINS SULFITES (or similar) flush-right
 // inside the same box as the government warning. Claude Vision captures the whole box
@@ -125,7 +125,7 @@ function checkGovernmentWarning(
   extraction: ClaudeExtractionResult,
 ): { matchStatus: MatchStatus; failReason: string | null; flags: ComplianceFlag[] } {
   const flags: ComplianceFlag[] = [];
-  const { value, confidence, prefixIsAllCaps, location } = extraction.governmentWarning;
+  const { value, confidence, location } = extraction.governmentWarning;
 
   if (!value) {
     flags.push({
@@ -158,26 +158,13 @@ function checkGovernmentWarning(
   let matchStatus: MatchStatus = "PASS";
   let failReason: string | null = null;
 
-  // FAIL #1: prefix not in all-caps
-  if (!prefixIsAllCaps) {
-    matchStatus = "FAIL";
-    failReason = "GOVERNMENT WARNING: prefix must appear in ALL CAPS";
-    flags.push({
-      field: "governmentWarning",
-      severity: "ERROR",
-      message: "GOVERNMENT WARNING: prefix is not in all-caps as required by TTB regulation (27 CFR 16.21). Found mixed case.",
-    });
-  }
-
   if (normalizedExtracted !== normalizedRequired) {
     const extractedUpper = normalizedExtracted.toUpperCase();
     const requiredUpper = normalizedRequired.toUpperCase();
     if (extractedUpper === requiredUpper) {
       // Body text matches the statutory wording — only casing differs.
-      // 27 CFR 16.21 mandates the PREFIX be all-caps but does NOT require
-      // specific casing for the body text.  All-caps body (as shown in
-      // the TTB's own sample labels) is fully compliant — do NOT fail here.
-      // (Already flagged above if the prefix itself wasn't all-caps.)
+      // Neither the prefix nor the body text requires specific casing.
+      // All-caps, mixed-case, title-case are all compliant — do NOT fail here.
     } else {
       // Words differ — actual statutory text mismatch.
       matchStatus = "FAIL";

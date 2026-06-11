@@ -8,7 +8,7 @@ import type { ClaudeExtractionResult } from "./label-types.js";
 //     When two images are provided, Claude must consider fields across both images.
 //   - VERBATIM extraction is required. Claude must NOT paraphrase or correct text.
 //     Corrections and normalization happen in compliance-engine.ts.
-//   - "GOVERNMENT WARNING:" capitalisation check is critical (27 CFR 16.21 requires ALL CAPS prefix).
+//   - Only the body TEXT of the Government Warning is checked against 27 CFR 16.21 statutory wording.
 //   - beverage-type-specific compliance requirements drive what Claude extracts:
 //       SPIRITS (27 CFR Part 5): ABV mandatory; sameFieldOfVision required
 //       WINE    (27 CFR Part 4): ABV mandatory (≥7% ABV); country of origin always required;
@@ -42,7 +42,7 @@ Return ONLY a valid JSON object (no markdown, no code blocks, just raw JSON) wit
   "governmentWarning": {
     "value": "<complete verbatim government warning statement text or null>",
     "confidence": <0.0-1.0>,
-    "prefixIsAllCaps": <true if 'GOVERNMENT WARNING:' prefix appears in ALL CAPS, false otherwise>,
+    "prefixIsAllCaps": <true if 'GOVERNMENT WARNING:' prefix appears in ALL CAPS, false otherwise — informational only, not used for compliance decisions>,
     "location": "<where on label: 'front label', 'back label', 'side label', 'bottom', 'cap/closure', 'foil capsule', or null>"
   },
   "bottlerProducer": {
@@ -86,7 +86,7 @@ Return ONLY a valid JSON object (no markdown, no code blocks, just raw JSON) wit
 
 IMPORTANT INSTRUCTIONS:
 1. Extract text VERBATIM — do not paraphrase or correct the text
-2. For the Government Warning, copy the EXACT text including capitalization. NOTE: the body text often appears in ALL CAPS on real labels — copy it exactly as printed. The only critical check is whether the "GOVERNMENT WARNING:" prefix itself is ALL CAPS.
+2. For the Government Warning, copy the EXACT text including capitalization. NOTE: the body text often appears in ALL CAPS on real labels — copy it exactly as printed. The prefix ("GOVERNMENT WARNING:", "Government Warning:", etc.) may appear in any case; copy it verbatim. Compliance is checked on the body text CONTENTS only, not on prefix casing.
 3. Government Warning and sulfite declarations: Labels often print "CONTAINS SULFITES" or "CONTAINS (A) SULFITING AGENT(S)" flush-right or bold INSIDE the same box as the government warning. Extract that as the sulfiteDeclaration.value, NOT as part of the governmentWarning.value. Stop the governmentWarning.value at "...may cause health problems." and do NOT include any trailing sulfite statement.
 4. beverageType: SPIRITS = distilled spirits (whiskey, vodka, gin, rum, tequila, brandy, scotch, etc.); WINE = grape wine/fruit wine/mead/sake; MALT = beer/ale/lager/stout/porter/cider/malt beverages
 5. Low confidence (<0.6) should be assigned to any field that is partially occluded, blurry, angled, or ambiguous
