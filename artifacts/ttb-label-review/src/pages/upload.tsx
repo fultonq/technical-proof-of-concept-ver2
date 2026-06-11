@@ -1178,7 +1178,7 @@ export default function UploadPage() {
                 {/* View report once all done */}
                 {allCsvDone && !isCsvProcessing && (
                   <div className="flex flex-wrap items-center gap-3">
-                    <Button size="lg" onClick={() => setLocation(`/results/${csvSessionId}`)}
+                    <Button size="lg" onClick={() => setLocation(`/results/${activeSessionId}`)}
                       className="text-lg px-10 py-4 h-auto font-bold">
                       View Full Session Report →
                     </Button>
@@ -1188,7 +1188,7 @@ export default function UploadPage() {
                       className="text-base px-6 py-3 h-auto"
                       onClick={() => {
                         const results = csvRows.filter(r => r.status === "complete" && r.result).map(r => r.result!);
-                        exportSessionToCSV(results, `ttb-report-${csvSessionId.slice(0, 8)}.csv`);
+                        exportSessionToCSV(results, `ttb-report-${activeSessionId.slice(0, 8)}.csv`);
                       }}
                     >
                       <Download className="w-4 h-4 mr-2" /> Download CSV
