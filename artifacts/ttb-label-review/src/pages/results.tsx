@@ -1,5 +1,6 @@
 import React from "react";
 import { useRoute, Link } from "wouter";
+import { useQueryClient } from "@tanstack/react-query";
 import { useGetSessionResults, getGetSessionResultsQueryKey } from "@workspace/api-client-react";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
@@ -11,19 +12,52 @@ import {
 import {
   ArrowLeft, Download, Plus, Search, Loader2, AlertCircle,
   CheckCircle2, XCircle, Clock, MessageSquare, Printer, ShieldCheck, ShieldX, ShieldAlert,
+  UploadCloud,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useToast } from "@/hooks/use-toast";
 
 export default function ResultsPage() {
   const [, params] = useRoute("/results/:sessionId");
   const sessionId = params?.sessionId || "";
+
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const { data: sessionData, isLoading, isError, error } = useGetSessionResults(sessionId, {
     query: { enabled: !!sessionId, queryKey: getGetSessionResultsQueryKey(sessionId) },
   });
 
   const [searchTerm, setSearchTerm] = React.useState("");
+
+  // ── Add label to existing session ─────────────────────────────────────────
+  const addFileRef = React.useRef<HTMLInputElement>(null);
+  const [isAdding, setIsAdding] = React.useState(false);
+  const [addingFileName, setAddingFileName] = React.useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = React.useState(false);
+
+  const handleAddLabel = async (file: File) => {
+    setIsAdding(true);
+    setAddingFileName(file.name);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("sessionId", sessionId);
+      const res = await fetch("/api/v1/labels/upload", { method: "POST", body: formData });
+      if (!res.ok) throw new Error("Upload failed — please try again.");
+      // Refresh the session results so the new label appears in the table
+      await queryClient.invalidateQueries({
+        queryKey: getGetSessionResultsQueryKey(sessionId),
+      });
+    } catch (err: any) {
+      toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+    } finally {
+      setIsAdding(false);
+      setAddingFileName(null);
+      if (addFileRef.current) addFileRef.current.value = "";
+    }
+  };
 
   // ── Per-label review decisions, loaded from localStorage ──────────────────
   const [reviewActions, setReviewActions] = React.useState<Record<string, ReturnType<typeof getSessionReviewActions>[string]>>({});
@@ -164,6 +198,51 @@ export default function ResultsPage() {
 
       {/* ── Label table ─────────────────────────────────────────────────── */}
       <div className="flex-1 p-6 max-w-6xl mx-auto w-full">
+
+        {/* ── Add label to this session ────────────────────────────────── */}
+        <div className="mb-5">
+          <input
+            ref={addFileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleAddLabel(f); }}
+          />
+          {isAdding ? (
+            <div className="flex items-center gap-3 px-4 py-3 bg-primary/5 border-2 border-dashed border-primary/30 rounded-xl text-sm text-primary font-medium">
+              <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+              Checking <strong className="mx-1">{addingFileName}</strong> — adding to this session…
+            </div>
+          ) : (
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => addFileRef.current?.click()}
+              onKeyDown={e => e.key === "Enter" && addFileRef.current?.click()}
+              onDragOver={e => { e.preventDefault(); setIsDragOver(true); }}
+              onDragLeave={() => setIsDragOver(false)}
+              onDrop={e => {
+                e.preventDefault();
+                setIsDragOver(false);
+                const f = e.dataTransfer.files[0];
+                if (f) handleAddLabel(f);
+              }}
+              className={`flex items-center gap-2 px-4 py-3 border-2 border-dashed rounded-xl cursor-pointer transition-colors text-sm font-medium select-none ${
+                isDragOver
+                  ? "border-primary bg-primary/5 text-primary"
+                  : "border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
+              }`}
+            >
+              <UploadCloud className="w-4 h-4 shrink-0" />
+              <span>
+                Drop a label image here or{" "}
+                <span className="underline underline-offset-2">browse</span>
+                {" "}— adds to this session
+              </span>
+              <span className="ml-auto text-xs text-muted-foreground/60">JPG · PNG · WebP</span>
+            </div>
+          )}
+        </div>
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
           <div>
