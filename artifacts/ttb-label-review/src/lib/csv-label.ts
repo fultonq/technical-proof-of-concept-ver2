@@ -1,10 +1,14 @@
-// Parses and processes the TTB applications CSV format.
+// Parses and processes label CSV/TXT files in flexible formats.
 //
-// Expected CSV columns (header row required):
-//   application_id, brand_name, class_type, alcohol_content, net_contents,
-//   address, is_imported, country_of_origin, beverage_type, age_statement,
-//   color_ingredients, commodity_statement, sulfite_aspartame, appellation,
-//   foreign_wine_pct
+// Column name matching is intentionally lenient — headers are normalised to
+// lowercase with non-alphanumeric chars collapsed to underscores, then
+// checked against a synonym table so common variations all resolve correctly:
+//
+//   brand / brand_name / product_name / product  →  brandName
+//   type / class / class_type / designation      →  classType
+//   abv / alcohol / alcohol_content / alc        →  alcoholContent
+//   volume / net_contents / size / contents      →  netContents
+//   … etc.
 
 export interface CsvLabelRow {
   applicationId: string;
@@ -24,7 +28,28 @@ export interface CsvLabelRow {
   foreignWinePct: string;
 }
 
-// Minimal RFC 4180-compliant CSV parser. Handles quoted fields with embedded commas/newlines.
+// ── Synonym map ──────────────────────────────────────────────────────────────
+// Key: canonical field name used in CsvLabelRow
+// Value: array of normalised header strings that map to it (most specific first)
+const SYNONYMS: Record<keyof CsvLabelRow, string[]> = {
+  applicationId:     ["application_id", "app_id", "id", "ttb_id", "application_number", "app_number", "serial"],
+  brandName:         ["brand_name", "brand", "product_name", "product", "label_name", "name"],
+  classType:         ["class_type", "class", "type", "designation", "product_type", "product_class", "style", "category"],
+  alcoholContent:    ["alcohol_content", "alcohol", "abv", "alc", "alcohol_by_volume", "alcohol_percentage", "proof", "abv_proof"],
+  netContents:       ["net_contents", "net_content", "volume", "size", "container_size", "bottle_size", "contents", "qty", "quantity"],
+  address:           ["address", "producer_address", "bottler_address", "plant_address", "location", "producer", "bottler", "bottled_by", "brewer", "distillery"],
+  isImported:        ["is_imported", "imported", "import", "foreign"],
+  countryOfOrigin:   ["country_of_origin", "country", "origin", "country_origin", "produced_in", "made_in"],
+  beverageType:      ["beverage_type", "beverage", "type_of_beverage", "alcohol_type", "product_category", "spirit_type", "wine_type", "beer_type"],
+  ageStatement:      ["age_statement", "age", "aged", "maturation", "years_aged"],
+  colorIngredients:  ["color_ingredients", "color", "colour", "ingredients", "additives", "coloring", "colouring"],
+  commodityStatement:["commodity_statement", "commodity", "statement"],
+  sulfiteAspartame:  ["sulfite_aspartame", "sulfite", "sulphite", "sulfites", "sulphites", "aspartame"],
+  appellation:       ["appellation", "appellation_of_origin", "ava", "region", "wine_region", "viticultural_area"],
+  foreignWinePct:    ["foreign_wine_pct", "foreign_wine", "foreign_pct", "foreign_wine_percent", "import_pct", "blend_pct"],
+};
+
+// ── Minimal RFC 4180-compliant CSV parser ─────────────────────────────────────
 function parseCSV(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
@@ -72,36 +97,60 @@ function parseCSV(text: string): string[][] {
   return rows;
 }
 
-// Parse a CSV string into typed row objects, skipping the header row.
+// Normalise a header string: lowercase, collapse non-alnum to underscore, trim.
+function normalise(h: string): string {
+  return h.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+// Build a lookup map from normalised header → CsvLabelRow field name.
+function buildLookup(): Map<string, keyof CsvLabelRow> {
+  const map = new Map<string, keyof CsvLabelRow>();
+  for (const [field, synonyms] of Object.entries(SYNONYMS) as [keyof CsvLabelRow, string[]][]) {
+    for (const syn of synonyms) {
+      if (!map.has(syn)) map.set(syn, field); // first match wins (most specific listed first)
+    }
+  }
+  return map;
+}
+
+const HEADER_LOOKUP = buildLookup();
+
+// Parse a CSV/TXT string into typed row objects, skipping the header row.
+// Tolerates any column order and a wide variety of header name styles.
 export function parseLabelCSV(csvText: string): CsvLabelRow[] {
   const allRows = parseCSV(csvText);
   if (allRows.length < 2) return [];
 
-  const headers = allRows[0].map(h => h.toLowerCase().replace(/[^a-z0-9]/g, "_"));
-  const idx = (name: string) => headers.indexOf(name);
+  // Map each column index → CsvLabelRow field name (or null if unrecognised)
+  const colMap: (keyof CsvLabelRow | null)[] = allRows[0].map(h => {
+    const key = normalise(h);
+    return HEADER_LOOKUP.get(key) ?? null;
+  });
 
-  const get = (row: string[], name: string): string => {
-    const i = idx(name);
-    return i >= 0 ? (row[i] ?? "").trim() : "";
+  const get = (row: string[], field: keyof CsvLabelRow): string => {
+    const colIdx = colMap.indexOf(field);
+    return colIdx >= 0 ? (row[colIdx] ?? "").trim() : "";
   };
 
-  return allRows.slice(1).filter(row => row.some(c => c !== "")).map(row => ({
-    applicationId: get(row, "application_id"),
-    brandName: get(row, "brand_name"),
-    classType: get(row, "class_type"),
-    alcoholContent: get(row, "alcohol_content"),
-    netContents: get(row, "net_contents"),
-    address: get(row, "address"),
-    isImported: get(row, "is_imported").toLowerCase() === "true",
-    countryOfOrigin: get(row, "country_of_origin"),
-    beverageType: get(row, "beverage_type"),
-    ageStatement: get(row, "age_statement"),
-    colorIngredients: get(row, "color_ingredients"),
-    commodityStatement: get(row, "commodity_statement"),
-    sulfiteAspartame: get(row, "sulfite_aspartame"),
-    appellation: get(row, "appellation"),
-    foreignWinePct: get(row, "foreign_wine_pct"),
-  }));
+  return allRows.slice(1)
+    .filter(row => row.some(c => c !== ""))
+    .map(row => ({
+      applicationId:     get(row, "applicationId"),
+      brandName:         get(row, "brandName"),
+      classType:         get(row, "classType"),
+      alcoholContent:    get(row, "alcoholContent"),
+      netContents:       get(row, "netContents"),
+      address:           get(row, "address"),
+      isImported:        get(row, "isImported").toLowerCase() === "true",
+      countryOfOrigin:   get(row, "countryOfOrigin"),
+      beverageType:      get(row, "beverageType"),
+      ageStatement:      get(row, "ageStatement"),
+      colorIngredients:  get(row, "colorIngredients"),
+      commodityStatement:get(row, "commodityStatement"),
+      sulfiteAspartame:  get(row, "sulfiteAspartame"),
+      appellation:       get(row, "appellation"),
+      foreignWinePct:    get(row, "foreignWinePct"),
+    }));
 }
 
 // Government warning required on all US alcohol labels (27 CFR Part 16).
@@ -126,9 +175,6 @@ const GOV_WARNING =
 // makes Claude Vision extraction more reliable during compliance checking.
 export function rowToLabelText(row: CsvLabelRow): string {
   const isWine = row.beverageType.toLowerCase().includes("wine");
-  const isSpirits =
-    row.beverageType.toLowerCase().includes("spirit") ||
-    row.beverageType.toLowerCase().includes("distilled");
   const isMalt =
     row.beverageType.toLowerCase().includes("malt") ||
     row.beverageType.toLowerCase().includes("beer") ||

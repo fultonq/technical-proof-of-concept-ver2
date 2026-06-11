@@ -796,7 +796,7 @@ export default function UploadPage() {
               <input type="file" ref={textFileRef} className="hidden" accept=".txt,text/plain" onChange={handleTextFileSelect} />
             </div>
             <Textarea
-              placeholder={`Brand Name: OLD TOM DISTILLERY\nType: Kentucky Straight Bourbon Whiskey\nABV: 45% Alc./Vol.\nNet Contents: 750 mL\nBottled by: Old Tom Distillery, 123 Barrel St, Louisville, KY 40202\n\nGOVERNMENT WARNING: (1) According to the Surgeon General…`}
+              placeholder={`Paste label text in any format — structured, free-form, or copied from a document. Examples:\n\nFree-form:\nOLD TOM DISTILLERY\nKentucky Straight Bourbon Whiskey\n45% Alc./Vol. (90 Proof)  ·  750 mL\nBottled by Old Tom Distillery LLC, Louisville KY 40202\nGOVERNMENT WARNING: (1) According to the Surgeon General…\n\nStructured:\nBrand: OLD TOM DISTILLERY\nType: Kentucky Straight Bourbon Whiskey\nABV: 45% Alc./Vol.\nNet Contents: 750 mL\nBottler: Old Tom Distillery LLC, Louisville KY 40202\nGOVERNMENT WARNING: (1) According to the Surgeon General…`}
               value={labelText}
               onChange={(e) => { setLabelText(e.target.value); setGeneratedSvg(null); }}
               disabled={isGenerating}

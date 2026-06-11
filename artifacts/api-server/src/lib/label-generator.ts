@@ -1,29 +1,57 @@
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 
-// Prompts Claude to produce a clean, readable SVG beverage label from free-form label text.
-// The SVG is used as input to the compliance checker — so legibility of text is more
-// important than visual polish. All mandatory TTB fields must be clearly readable.
-const SVG_PROMPT = `You are an alcohol beverage label design tool. Given label text content pasted by a user, produce a valid SVG representing a realistic bottle label.
+// Two-phase SVG generation prompt.
+//
+// Phase 1 — IDENTIFY: Claude first locates each TTB mandatory field in the
+// input text regardless of its format (free-form, structured "Field: Value",
+// CSV column dump, or mixed). Explicitly listing what each field looks like
+// prevents Claude from mis-assigning lines to the wrong slot (e.g. putting
+// the ABV in the brand-name position when a free-form label lists it first).
+//
+// Phase 2 — RENDER: Claude then lays out the identified fields in proper
+// TTB visual order to produce a readable SVG image for the vision extractor.
+//
+// Legibility > polish: the SVG is fed to Claude Vision for compliance
+// extraction, so every field must appear clearly on screen.
+const SVG_PROMPT = `You are an alcohol beverage label design tool that produces SVG label images for TTB (Alcohol and Tobacco Tax and Trade Bureau) compliance review.
 
-REQUIREMENTS:
-- SVG element: <svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" ...>
-- Cream or off-white background (#fdf8f0 or similar)
-- A decorative border (double border recommended)
-- Lay out the fields in this order top-to-bottom:
-    1. Brand Name — large bold text at top (~48px), centered
-    2. Class / Type designation — medium text (~22px), centered, italicized
-    3. Decorative rule or ornament divider
-    4. Any tagline or subtitle in the middle
-    5. ABV (Alcohol Content) and Net Contents side by side, ~20px
-    6. Bottler / Producer name and address — small text (~14px), centered
-    7. Country of Origin (if provided) — small text
-    8. Government Warning Statement — very small (~11px), left-aligned, near bottom, full verbatim text
-- Use only system-safe fonts: Arial, Helvetica, Georgia, serif, or sans-serif
-- ALL text must be HIGH CONTRAST against the background (dark text on light bg)
-- Wrap long text using multiple <text> or <tspan> elements — do NOT let text overflow outside the SVG
-- Return ONLY the raw SVG XML — no markdown fences, no explanation, just the <svg>...</svg>
+=== PHASE 1: IDENTIFY TTB FIELDS ===
+From the input text (which may be in ANY format — free-form, "Field: Value" pairs, sentence form, CSV dump, or mixed order) silently identify each of the following TTB mandatory label fields:
 
-LABEL TEXT TO RENDER:
+• BRAND NAME — The brand or product name. The most prominent identity element (e.g. "OLD TOM DISTILLERY", "Maker's Mark", "Napa Valley Reserve"). NOT the producer address, NOT the class/type.
+• CLASS/TYPE — The product category designation (e.g. "Kentucky Straight Bourbon Whiskey", "Chardonnay", "American Lager", "Blended Scotch Whisky", "Table Wine", "Vodka").
+• ALCOHOL CONTENT — ABV percentage with unit and/or proof (e.g. "45% Alc./Vol.", "40% alc./vol. (80 Proof)", "13.5% alc/vol", "6% alcohol by volume").
+• NET CONTENTS — Volume with units (e.g. "750 mL", "12 fl oz", "1.75 L", "500ml").
+• BOTTLER/PRODUCER — Name and full address of bottler, brewer, producer, or packer (e.g. "Bottled by Jack Daniel Distillery, Lynchburg, TN 37352").
+• COUNTRY OF ORIGIN — Country name if present (e.g. "Product of Scotland", "Imported from France", "United States").
+• GOVERNMENT WARNING — The full statutory warning text starting with "GOVERNMENT WARNING:" (required on all US-sold labels).
+• WINE-SPECIFIC — Appellation of origin (e.g. "Napa Valley", "California"), sulfite/sulfiting declaration (e.g. "Contains sulfites").
+
+If a field is not present in the input text, omit it from the SVG entirely.
+
+=== PHASE 2: RENDER THE SVG LABEL ===
+Using ONLY the fields you identified above, produce a valid SVG label:
+
+SVG SPECIFICATIONS:
+- Root: <svg xmlns="http://www.w3.org/2000/svg" width="600" height="900" viewBox="0 0 600 900">
+- Background: cream/off-white fill (#fdf8f0)
+- A decorative double border (outer rect + inner rect, dark stroke)
+- Layout top-to-bottom inside the border:
+    1. BRAND NAME — largest text (≈48px), bold, centered near top
+    2. CLASS/TYPE — medium (≈22px), centered, italic
+    3. Decorative horizontal rule
+    4. ALCOHOL CONTENT and NET CONTENTS — side by side (≈20px), centered
+    5. BOTTLER/PRODUCER — small (≈14px), centered, multi-line if needed
+    6. COUNTRY OF ORIGIN — small (≈13px), centered (only if present)
+    7. WINE-SPECIFIC fields — appellation, sulfite (≈13px), centered (only if present)
+    8. GOVERNMENT WARNING — very small (≈11px), left-aligned, near bottom, FULL verbatim text wrapped across multiple lines
+- Fonts: use only Arial, Helvetica, Georgia, or generic serif/sans-serif
+- ALL text must be HIGH CONTRAST dark color (e.g. #1a1a1a or #2c1810) on the light background
+- Wrap ALL long text using multiple <tspan dy="1.2em"> elements — absolutely no text may overflow outside the SVG boundary
+- GOVERNMENT WARNING must be fully visible — split into as many tspan lines as needed
+- Return ONLY the raw SVG XML starting with <svg — no markdown fences, no explanation, no surrounding text
+
+=== INPUT LABEL TEXT (any format accepted) ===
 `;
 
 export async function generateLabelSvg(labelText: string): Promise<string> {
