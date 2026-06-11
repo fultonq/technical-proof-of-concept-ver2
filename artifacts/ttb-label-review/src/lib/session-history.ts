@@ -3,6 +3,40 @@
 // server's in-memory store — intentional for the PoC).
 
 const STORAGE_KEY = "ttb_session_history";
+
+// ── Active session ID ─────────────────────────────────────────────────────────
+// A single "current session" accumulates all labels uploaded in this browser
+// session, regardless of upload mode (single / batch / generate / CSV).
+// Creating a new session starts a fresh accumulator.
+
+const ACTIVE_SESSION_KEY = "ttb_active_session_id";
+
+/** Returns the current active session ID, creating one if none exists yet. */
+export function getOrCreateActiveSessionId(): string {
+  try {
+    let id = localStorage.getItem(ACTIVE_SESSION_KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(ACTIVE_SESSION_KEY, id);
+    }
+    return id;
+  } catch {
+    // Storage unavailable — return an ephemeral ID (labels will still work,
+    // just won't persist across refreshes).
+    return crypto.randomUUID();
+  }
+}
+
+/** Mints a new active session ID and persists it, discarding the old one. */
+export function resetActiveSessionId(): string {
+  try {
+    const id = crypto.randomUUID();
+    localStorage.setItem(ACTIVE_SESSION_KEY, id);
+    return id;
+  } catch {
+    return crypto.randomUUID();
+  }
+}
 const MAX_ENTRIES = 20;
 
 export interface SessionRecord {

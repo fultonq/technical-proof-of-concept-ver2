@@ -16,7 +16,7 @@ import { LabelAnalysisResult } from "@workspace/api-client-react";
 import { parseLabelCSV, rowToLabelText, type CsvLabelRow } from "@/lib/csv-label";
 import { exportSessionToCSV } from "@/lib/csv-export";
 import { generatePrintReport } from "@/lib/print-report";
-import { saveSession } from "@/lib/session-history";
+import { saveSession, getOrCreateActiveSessionId, resetActiveSessionId } from "@/lib/session-history";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -342,7 +342,9 @@ export default function UploadPage() {
 
   // ── Batch image mode ────────────────────────────────────────────────────
   const [batchQueue, setBatchQueue] = useState<QueuedFile[]>([]);
-  const [batchSessionId, setBatchSessionId] = useState<string | null>(null);
+  // Persistent session ID — shared across ALL upload modes so every label in a
+  // browser session accumulates in one server-side session.
+  const [activeSessionId, setActiveSessionId] = useState(() => getOrCreateActiveSessionId());
   const [isDragOver, setIsDragOver] = useState(false);
   const batchFileRef = useRef<HTMLInputElement>(null);
 
@@ -358,7 +360,7 @@ export default function UploadPage() {
   const [csvRows, setCsvRows] = useState<CsvRowState[]>([]);
   const [csvFileName, setCsvFileName] = useState<string | null>(null);
   const [isCsvProcessing, setIsCsvProcessing] = useState(false);
-  const [csvSessionId] = useState(() => crypto.randomUUID());
+  // csvSessionId removed — CSV mode now uses activeSessionId like all other modes
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [modalRow, setModalRow] = useState<CsvRowState | null>(null);
   const csvFileRef = useRef<HTMLInputElement>(null);
@@ -380,14 +382,15 @@ export default function UploadPage() {
     try {
       const formData = new FormData();
       formData.append("file", singleFile);
+      formData.append("sessionId", activeSessionId);
       if (showBackLabel && backFile) formData.append("backFile", backFile);
       if (expectedBrandName.trim()) formData.append("expectedBrandName", expectedBrandName.trim());
       if (selectedBeverageType) formData.append("expectedBeverageType", selectedBeverageType);
       const res = await fetch("/api/v1/labels/upload", { method: "POST", body: formData });
       if (!res.ok) throw new Error("Upload failed — please try again.");
       const data: LabelAnalysisResult = await res.json();
-      saveSession({ sessionId: data.sessionId, type: "single", labelCount: 1, fileName: singleFile.name });
-      setLocation(`/results/${data.sessionId}`);
+      saveSession({ sessionId: activeSessionId, type: "single", labelCount: 1, fileName: singleFile.name });
+      setLocation(`/results/${activeSessionId}`);
     } catch (err: any) {
       toast({ title: "Something went wrong", description: err.message, variant: "destructive" });
     } finally {
@@ -400,28 +403,24 @@ export default function UploadPage() {
     const pending = batchQueue.filter(f => f.status === "pending" || f.status === "error");
     if (!pending.length) return;
     setIsUploading(true);
-    let currentSessionId = batchSessionId;
     for (const qf of pending) {
       setBatchQueue(prev => prev.map(f => f.id === qf.id ? { ...f, status: "uploading" } : f));
       try {
         const formData = new FormData();
         formData.append("file", qf.file);
-        if (currentSessionId) formData.append("sessionId", currentSessionId);
+        formData.append("sessionId", activeSessionId);
         const res = await fetch("/api/v1/labels/upload", { method: "POST", body: formData });
         if (!res.ok) throw new Error("Failed to process " + qf.file.name);
         const data: LabelAnalysisResult = await res.json();
-        if (!currentSessionId) { currentSessionId = data.sessionId; setBatchSessionId(data.sessionId); }
         setBatchQueue(prev => prev.map(f => f.id === qf.id ? { ...f, status: "complete", result: data } : f));
       } catch (err: any) {
         setBatchQueue(prev => prev.map(f => f.id === qf.id ? { ...f, status: "error", error: err.message } : f));
       }
     }
     setIsUploading(false);
-    if (currentSessionId) {
-      const completedCount = batchQueue.filter(f => f.status === "complete").length + 1;
-      saveSession({ sessionId: currentSessionId, type: "batch", labelCount: completedCount });
-      setLocation(`/results/${currentSessionId}`);
-    }
+    const completedCount = batchQueue.filter(f => f.status === "complete").length + pending.filter(f => f.status !== "error").length;
+    saveSession({ sessionId: activeSessionId, type: "batch", labelCount: completedCount });
+    setLocation(`/results/${activeSessionId}`);
   };
 
   // ── Generate mode ───────────────────────────────────────────────────────
@@ -472,14 +471,15 @@ export default function UploadPage() {
     try {
       const formData = new FormData();
       formData.append("file", await svgToBlob(generatedSvg), "generated-label.png");
+      formData.append("sessionId", activeSessionId);
       if (generatedBackSvg) {
         formData.append("backFile", await svgToBlob(generatedBackSvg), "generated-label-back.png");
       }
       const res = await fetch("/api/v1/labels/upload", { method: "POST", body: formData });
       if (!res.ok) throw new Error("Compliance check failed.");
       const data: LabelAnalysisResult = await res.json();
-      saveSession({ sessionId: data.sessionId, type: "generate", labelCount: 1 });
-      setLocation(`/results/${data.sessionId}`);
+      saveSession({ sessionId: activeSessionId, type: "generate", labelCount: 1 });
+      setLocation(`/results/${activeSessionId}`);
     } catch (err: any) {
       toast({ title: "Something went wrong", description: err.message, variant: "destructive" });
     } finally {
@@ -569,7 +569,7 @@ export default function UploadPage() {
         const blob = await svgToBlob(svg);
         const formData = new FormData();
         formData.append("file", blob, `${row.applicationId || row.brandName || "label"}.png`);
-        formData.append("sessionId", csvSessionId);
+        formData.append("sessionId", activeSessionId);
         // NOTE: We intentionally do NOT send expectedBrandName here.
         // For AI-generated labels the brand name is provably correct (we wrote it),
         // so the Levenshtein cross-check only introduces false failures when Claude
@@ -619,24 +619,49 @@ export default function UploadPage() {
   useEffect(() => {
     if (allCsvDone && csvCompleteCount > 0) {
       saveSession({
-        sessionId: csvSessionId,
+        sessionId: activeSessionId,
         type: "csv",
         labelCount: csvCompleteCount,
         fileName: csvFileName ?? undefined,
       });
     }
-  }, [allCsvDone, csvCompleteCount, csvSessionId, csvFileName]);
+  }, [allCsvDone, csvCompleteCount, activeSessionId, csvFileName]);
 
   return (
     <div className="flex-1 p-6 md:p-12 max-w-3xl mx-auto w-full">
 
       {/* Page heading */}
       <div className="mb-8">
-        <h2 className="text-3xl font-bold tracking-tight text-foreground">Check a Label</h2>
-        <p className="text-lg text-muted-foreground mt-2">
-          Upload label photos or import a CSV of applications to generate and check labels automatically.
-          Handles beer, wine, and distilled spirits.
-        </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-3xl font-bold tracking-tight text-foreground">Check a Label</h2>
+            <p className="text-lg text-muted-foreground mt-2">
+              Upload label photos or import a CSV of applications to generate and check labels automatically.
+              Handles beer, wine, and distilled spirits.
+            </p>
+          </div>
+          <div className="flex flex-col items-end gap-1 shrink-0 pt-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 whitespace-nowrap"
+              onClick={() => setLocation(`/results/${activeSessionId}`)}
+            >
+              <FolderOpen className="w-4 h-4" /> View Session
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 whitespace-nowrap text-muted-foreground hover:text-destructive"
+              onClick={() => {
+                const newId = resetActiveSessionId();
+                setActiveSessionId(newId);
+              }}
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> New Session
+            </Button>
+          </div>
+        </div>
       </div>
 
       {/* Mode toggle + report actions */}
@@ -1175,14 +1200,14 @@ export default function UploadPage() {
                       onClick={() => {
                         const results = csvRows.filter(r => r.status === "complete" && r.result).map(r => r.result!);
                         const sessionData = {
-                          sessionId: csvSessionId,
+                          sessionId: activeSessionId,
                           totalCount: results.length,
                           passCount:  results.filter(r => r.overallStatus === "PASS").length,
                           failCount:  results.filter(r => r.overallStatus === "FAIL").length,
                           reviewCount:results.filter(r => r.overallStatus === "REVIEW").length,
                           results,
                         };
-                        const html = generatePrintReport(sessionData, {}, csvSessionId, {});
+                        const html = generatePrintReport(sessionData, {}, activeSessionId, {});
                         const win = window.open("", "_blank");
                         if (win) { win.document.write(html); win.document.close(); win.print(); }
                       }}
