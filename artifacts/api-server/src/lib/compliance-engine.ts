@@ -355,6 +355,43 @@ function checkCountryOfOrigin(
   };
 }
 
+// Multi-varietal blend percentage check — WINE ONLY (27 CFR 4.23(d)).
+// When two or more grape varieties appear as the type designation each variety
+// must state its percentage of the blend, and ALL percentages must total 100%.
+// Examples that FAIL: "60% Chardonnay / 30% Semillon" (totals 90%);
+//   "Chardonnay / Semillon" with no percentages at all.
+// Examples that PASS: "60% Chardonnay / 40% Semillon" (totals 100%).
+// A single named variety with no percentage is a standard varietal — not a blend.
+function checkVarietalBlendPercentages(
+  extraction: ClaudeExtractionResult,
+): ComplianceFlag[] {
+  const flags: ComplianceFlag[] = [];
+  if (extraction.beverageType !== "WINE") return flags;
+
+  const classType = extraction.classType?.value;
+  if (!classType) return flags;
+
+  // Find all percentage values in the class/type string.
+  const pctMatches = [...classType.matchAll(/(\d+(?:\.\d+)?)\s*%/g)];
+  if (pctMatches.length < 2) return flags; // single or no percentages — not a blend check
+
+  const total = pctMatches.reduce((sum, m) => sum + parseFloat(m[1]), 0);
+  const tolerance = 0.6; // ±0.6% accounts for rounding of individual components
+
+  if (Math.abs(total - 100) > tolerance) {
+    flags.push({
+      field: "classType",
+      severity: "ERROR",
+      message:
+        `Multi-varietal blend percentages must total 100% (27 CFR 4.23(d)). ` +
+        `Extracted percentages sum to ${total.toFixed(1)}%. ` +
+        `Each named grape variety must show its percentage and all must add to 100%.`,
+    });
+  }
+
+  return flags;
+}
+
 // Appellation of Origin check — WINE ONLY (27 CFR 4.23 / 4.25).
 // Required when the wine uses a varietal designation (e.g. "Chardonnay", "Cabernet Sauvignon")
 // or a vintage date.  Claude determines isMandatory based on the label context.
@@ -580,6 +617,8 @@ export function runComplianceChecks(
     classFlags,
   );
   allFlags.push(...classFlags);
+  // Multi-varietal blend: percentages must total 100% (27 CFR 4.23(d))
+  allFlags.push(...checkVarietalBlendPercentages(eff));
   const classField = buildFieldResult(
     extraction.classType.value,
     expectedValues.classType ?? null,

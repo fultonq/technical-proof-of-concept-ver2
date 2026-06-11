@@ -27,7 +27,7 @@ Return ONLY a valid JSON object (no markdown, no code blocks, just raw JSON) wit
     "confidence": <0.0-1.0>
   },
   "classType": {
-    "value": "<class/type designation — e.g. 'Kentucky Straight Bourbon Whiskey', 'Chardonnay', 'Table Wine', 'Ale', 'Beer', 'Lager', or null>",
+    "value": "<class/type designation — e.g. 'Kentucky Straight Bourbon Whiskey', 'Chardonnay', 'Red Wine', 'Table Wine', 'Ale', 'Beer', 'Lager', or for multi-varietal blends include the percentages verbatim e.g. '60% Chardonnay / 40% Semillon', '70% Cabernet Sauvignon 30% Merlot'; IMPORTANT: if an appellation appears on the same line as varieties (e.g. 'CALIFORNIA 60% CHARDONNAY 40% SEMILLON') extract ONLY the varietal blend as classType — the geographic name is the appellation, not part of the class/type>",
     "confidence": <0.0-1.0>
   },
   "alcoholContent": {
@@ -91,7 +91,7 @@ IMPORTANT INSTRUCTIONS:
 4. beverageType: SPIRITS = distilled spirits (whiskey, vodka, gin, rum, tequila, brandy, scotch, etc.); WINE = grape wine/fruit wine/mead/sake; MALT = beer/ale/lager/stout/porter/cider/malt beverages
 5. Low confidence (<0.6) should be assigned to any field that is partially occluded, blurry, angled, or ambiguous
 6. sameFieldOfVision: ONLY for SPIRITS (set null for WINE/MALT). Checks that Brand Name, Class/Type, and ABV are all visible on the same panel without rotating the container
-7. appellationOfOrigin and sulfiteDeclaration: ONLY for WINE (set null for SPIRITS/MALT)
+7. appellationOfOrigin and sulfiteDeclaration: ONLY for WINE (set null for SPIRITS/MALT). For multi-varietal blends: when varieties appear with percentages (e.g. "60% CHARDONNAY / 40% SEMILLON"), extract the full blend string verbatim as classType.value — do NOT split it. Any adjacent geographic name (e.g. "CALIFORNIA" on the same strip label) is the appellation, not part of classType.
 8. countryOfOrigin for WINE: ALWAYS provide a value. Accepted formats include: explicit "Country of Origin: X", "PRODUCT OF X", "Product of X", "Imported from X", or inferred from the appellation — e.g. "American Merlot" or "California Chardonnay" → value="United States", isDomestic=true; "Bordeaux" or "Victoria" (Australian region) → value="France"/"Australia", isDomestic=false. US appellations (American, California, Napa Valley, Oregon, Washington, New York, etc.) → value="United States", isDomestic=true.
 9. ABV formats — all of these are valid: "40% Alc./Vol.", "40% ABV", "ALC. 15.5% BY VOL.", "ALC 40% BY VOL", "13.5% alc/vol", "6% alcohol by volume", "80 Proof". Extract verbatim.
 10. Respond with ONLY the JSON object — no additional text, explanation, or formatting`;
