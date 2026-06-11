@@ -50,9 +50,9 @@ Return ONLY a valid JSON object (no markdown, no code blocks, just raw JSON) wit
     "confidence": <0.0-1.0>
   },
   "countryOfOrigin": {
-    "value": "<country name — required for ALL WINE even if domestic; required for imported SPIRITS/MALT; null only for domestic SPIRITS/MALT>",
+    "value": "<country name — for WINE: required; if no explicit 'Country of Origin' line exists, infer from appellation (e.g. 'American Merlot' → 'United States', 'California Chardonnay' → 'United States', 'Bordeaux' → 'France'); for imported SPIRITS/MALT: extract country name; null only for domestic SPIRITS/MALT with no country stated>",
     "confidence": <0.0-1.0>,
-    "isDomestic": <true if product appears to be domestic USA product, false if imported>
+    "isDomestic": <true if product is from the USA, false if imported>
   },
   "sameFieldOfVision": <FOR DISTILLED SPIRITS ONLY — set to null for WINE and MALT> | {
     "allOnSamePanel": <true if Brand Name, ABV, and Class/Type all appear on the same label face without rotating>,
@@ -86,14 +86,15 @@ Return ONLY a valid JSON object (no markdown, no code blocks, just raw JSON) wit
 
 IMPORTANT INSTRUCTIONS:
 1. Extract text VERBATIM — do not paraphrase or correct the text
-2. For the Government Warning, copy the EXACT text character-by-character including capitalization
-3. Pay special attention to whether the Government Warning prefix is 'GOVERNMENT WARNING:' (ALL CAPS) vs 'Government Warning:' (title case) — this is a critical compliance check
-4. beverageType: SPIRITS = distilled spirits (whiskey, vodka, gin, rum, tequila, brandy, etc.); WINE = grape wine/fruit wine/mead/sake; MALT = beer/ale/lager/stout/porter/cider/malt beverages
+2. For the Government Warning, copy the EXACT text including capitalization. NOTE: the body text often appears in ALL CAPS on real labels — copy it exactly as printed. The only critical check is whether the "GOVERNMENT WARNING:" prefix itself is ALL CAPS.
+3. Government Warning and sulfite declarations: Labels often print "CONTAINS SULFITES" or "CONTAINS (A) SULFITING AGENT(S)" flush-right or bold INSIDE the same box as the government warning. Extract that as the sulfiteDeclaration.value, NOT as part of the governmentWarning.value. Stop the governmentWarning.value at "...may cause health problems." and do NOT include any trailing sulfite statement.
+4. beverageType: SPIRITS = distilled spirits (whiskey, vodka, gin, rum, tequila, brandy, scotch, etc.); WINE = grape wine/fruit wine/mead/sake; MALT = beer/ale/lager/stout/porter/cider/malt beverages
 5. Low confidence (<0.6) should be assigned to any field that is partially occluded, blurry, angled, or ambiguous
 6. sameFieldOfVision: ONLY for SPIRITS (set null for WINE/MALT). Checks that Brand Name, Class/Type, and ABV are all visible on the same panel without rotating the container
 7. appellationOfOrigin and sulfiteDeclaration: ONLY for WINE (set null for SPIRITS/MALT)
-8. countryOfOrigin: For WINE it is ALWAYS required — include the value even for domestic USA wines (value should be "United States" or "USA" for domestic wine)
-9. Respond with ONLY the JSON object — no additional text, explanation, or formatting`;
+8. countryOfOrigin for WINE: ALWAYS provide a value. If no explicit "Country of Origin" line exists, infer from the appellation — e.g. "American Merlot" or "California Chardonnay" → value="United States", isDomestic=true; "Bordeaux" → value="France", isDomestic=false. US appellations (American, California, Napa Valley, Oregon, Washington, etc.) all map to value="United States".
+9. ABV formats — all of these are valid: "40% Alc./Vol.", "40% ABV", "ALC. 15.5% BY VOL.", "ALC 40% BY VOL", "13.5% alc/vol", "6% alcohol by volume", "80 Proof". Extract verbatim.
+10. Respond with ONLY the JSON object — no additional text, explanation, or formatting`;
 
 export interface LabelImage {
   buffer: Buffer;

@@ -100,9 +100,27 @@ function matchBrandName(
 // Validates three distinct failure modes:
 //   1. MISSING — statement absent entirely → FAIL
 //   2. PREFIX CAPITALISATION — "GOVERNMENT WARNING:" not ALL CAPS → FAIL (27 CFR 16.21)
-//   3. TEXT MISMATCH — body text differs from exact statutory wording → FAIL
+//   3. TEXT MISMATCH — body text differs from statutory wording (case-insensitive) → FAIL
 //   4. PROHIBITED LOCATION — warning on bottom/cap/foil → FAIL (27 CFR 7.61)
 // Multiple flags can be pushed in one call (e.g. wrong prefix AND wrong location).
+//
+// CASING NOTE: 27 CFR 16.21 only requires the "GOVERNMENT WARNING:" prefix in ALL CAPS.
+// The body text may appear in any case (all-caps, mixed, lowercase) and still comply.
+// The TTB's own sample labels show the body in ALL CAPS — we must not FAIL for that.
+//
+// SULFITE STRIP NOTE: Labels often print CONTAINS SULFITES (or similar) flush-right
+// inside the same box as the government warning. Claude Vision captures the whole box
+// as the GW value. We strip any trailing sulfite/aspartame declaration before comparing
+// so it is not treated as a government warning text deviation.
+
+// Sulfite/aspartame declarations that may be appended inside the GW text block.
+const TRAILING_DECLARATIONS_RE =
+  /\s*(CONTAINS\s+SULFITES?|CONTAINS\s+\(A\)\s+SULFITING\s+AGENT[\w\s()]*|NO\s+SULFITES\s+ADDED|SULFITE\s+FREE|CONTAINS\s+ASPARTAME|CONTAINS\s+PHENYLALANINE)[^]*$/i;
+
+function stripTrailingDeclarations(text: string): string {
+  return text.replace(TRAILING_DECLARATIONS_RE, "").trim();
+}
+
 function checkGovernmentWarning(
   extraction: ClaudeExtractionResult,
 ): { matchStatus: MatchStatus; failReason: string | null; flags: ComplianceFlag[] } {
@@ -130,12 +148,17 @@ function checkGovernmentWarning(
     };
   }
 
-  const normalizedExtracted = normalizeWhitespace(value);
+  // Strip any trailing sulfite/aspartame declaration that Claude captured in the same
+  // text block before doing the statutory text comparison.
+  const cleanedValue = stripTrailingDeclarations(value);
+
+  const normalizedExtracted = normalizeWhitespace(cleanedValue);
   const normalizedRequired = normalizeWhitespace(REQUIRED_GOVERNMENT_WARNING);
 
   let matchStatus: MatchStatus = "PASS";
   let failReason: string | null = null;
 
+  // FAIL #1: prefix not in all-caps
   if (!prefixIsAllCaps) {
     matchStatus = "FAIL";
     failReason = "GOVERNMENT WARNING: prefix must appear in ALL CAPS";
@@ -150,22 +173,19 @@ function checkGovernmentWarning(
     const extractedUpper = normalizedExtracted.toUpperCase();
     const requiredUpper = normalizedRequired.toUpperCase();
     if (extractedUpper === requiredUpper) {
-      if (matchStatus === "PASS") {
-        matchStatus = "FAIL";
-        failReason = "Government Warning text capitalization does not match required statutory text";
-      }
-      flags.push({
-        field: "governmentWarning",
-        severity: "ERROR",
-        message: "Government Warning capitalization differs from required statutory text.",
-      });
+      // Body text matches the statutory wording — only casing differs.
+      // 27 CFR 16.21 mandates the PREFIX be all-caps but does NOT require
+      // specific casing for the body text.  All-caps body (as shown in
+      // the TTB's own sample labels) is fully compliant — do NOT fail here.
+      // (Already flagged above if the prefix itself wasn't all-caps.)
     } else {
+      // Words differ — actual statutory text mismatch.
       matchStatus = "FAIL";
       failReason = failReason ?? "Government Warning text does not match required statutory text";
       flags.push({
         field: "governmentWarning",
         severity: "ERROR",
-        message: "Government Warning text does not match required statutory text (word-for-word match required).",
+        message: "Government Warning text does not match required statutory text (word-for-word match required by 27 CFR 16.21).",
       });
     }
   }
@@ -252,6 +272,13 @@ function checkAbv(
 //     Domestic wines must state "United States" or equivalent.
 //   - SPIRITS (27 CFR 5.36(d)): Required only for imported products.
 //   - MALT (27 CFR 7.30): Required only for imported products.
+//
+// APPELLATION SUBSTITUTE (27 CFR 4.32(a)(3)/(c)):
+//   For domestic wine, a US appellation of origin (e.g. "American", "California",
+//   "Napa Valley") present on the label satisfies the country-of-origin requirement
+//   because it unambiguously identifies the country.  When no explicit country value
+//   is extracted but isDomestic=true and an appellation is present, report PASS using
+//   the appellation as the extracted country-of-origin value rather than FAIL.
 function checkCountryOfOrigin(
   extraction: ClaudeExtractionResult,
 ): { field: FieldResult | null; flags: ComplianceFlag[] } {
@@ -268,6 +295,31 @@ function checkCountryOfOrigin(
 
   if (!value) {
     if (isMandatory) {
+      // Wine + domestic + appellation present → appellation satisfies 27 CFR 4.32(a)(3)
+      const appellation =
+        isWine && isDomestic
+          ? extraction.appellationOfOrigin?.value ?? null
+          : null;
+
+      if (appellation) {
+        // Use the appellation as the country-of-origin indicator (PASS).
+        const appellationConfidence = extraction.appellationOfOrigin?.confidence ?? 0.8;
+        return {
+          field: {
+            extractedValue: appellation,
+            expectedValue: null,
+            matchStatus: appellationConfidence < CONFIDENCE_THRESHOLD ? "NEEDS_REVIEW" : "PASS",
+            confidence: appellationConfidence,
+            failReason:
+              appellationConfidence < CONFIDENCE_THRESHOLD
+                ? "Country inferred from appellation — low confidence"
+                : null,
+            isMandatory: true,
+          },
+          flags,
+        };
+      }
+
       const msg = isWine
         ? "Country of Origin is required on all wine labels (27 CFR 4.32(a)(3)), including domestic wines."
         : "Country of Origin is required for imported products.";
