@@ -26,6 +26,10 @@ export interface CsvLabelRow {
   sulfiteAspartame: string;
   appellation: string;
   foreignWinePct: string;
+  /** Raw free-form label text (takes priority over structured fields when present). */
+  labelText: string;
+  /** Raw back-label text (optional; submitted as backFile to the compliance API). */
+  backLabelText: string;
 }
 
 // ── Synonym map ──────────────────────────────────────────────────────────────
@@ -47,6 +51,9 @@ const SYNONYMS: Record<keyof CsvLabelRow, string[]> = {
   sulfiteAspartame:  ["sulfite_aspartame", "sulfite", "sulphite", "sulfites", "sulphites", "aspartame"],
   appellation:       ["appellation", "appellation_of_origin", "ava", "region", "wine_region", "viticultural_area"],
   foreignWinePct:    ["foreign_wine_pct", "foreign_wine", "foreign_pct", "foreign_wine_percent", "import_pct", "blend_pct"],
+  // Raw label copy columns — take priority over all structured fields
+  labelText:         ["label_text", "label_copy", "front_label", "front_label_text", "raw_text", "raw_label", "label_content", "label"],
+  backLabelText:     ["back_label_text", "back_label", "back_label_copy", "back_copy", "back_text"],
 };
 
 // ── Minimal RFC 4180-compliant CSV parser ─────────────────────────────────────
@@ -150,6 +157,8 @@ export function parseLabelCSV(csvText: string): CsvLabelRow[] {
       sulfiteAspartame:  get(row, "sulfiteAspartame"),
       appellation:       get(row, "appellation"),
       foreignWinePct:    get(row, "foreignWinePct"),
+      labelText:         get(row, "labelText"),
+      backLabelText:     get(row, "backLabelText"),
     }));
 }
 
@@ -174,6 +183,10 @@ const GOV_WARNING =
 // label image where each field occupies its proper visual position, which in turn
 // makes Claude Vision extraction more reliable during compliance checking.
 export function rowToLabelText(row: CsvLabelRow): string {
+  // If the CSV supplied a raw label_text column, use it verbatim.
+  // The SVG generator understands free-form text — no reformatting needed.
+  if (row.labelText?.trim()) return row.labelText.trim();
+
   const isWine = row.beverageType.toLowerCase().includes("wine");
   const isMalt =
     row.beverageType.toLowerCase().includes("malt") ||

@@ -83,6 +83,42 @@ function RowStatusLabel({ status }: { status: CsvRowState["status"] }) {
   return null;
 }
 
+/**
+ * Splits text that contains "FRONT LABEL:" / "BACK LABEL:" section headers
+ * (as produced by TTB_Labels.txt-style exports) into separate front and back
+ * strings. Returns { front: text, back: null } when no section headers are
+ * found — the whole text is treated as a single-panel label.
+ */
+function splitFrontBack(text: string): { front: string; back: string | null } {
+  // Match lines like "FRONT LABEL:", "FRONT LABEL -", "== FRONT LABEL ==" etc.
+  const frontRe = /^[^\n]*FRONT\s+LABEL[^:\n]*:?\s*$/im;
+  const backRe  = /^[^\n]*BACK\s+LABEL[^:\n]*:?\s*$/im;
+  const frontMatch = frontRe.exec(text);
+  const backMatch  = backRe.exec(text);
+  if (!frontMatch && !backMatch) return { front: text.trim(), back: null };
+
+  // Start of front content = after the FRONT LABEL header line
+  const frontLineEnd = frontMatch
+    ? frontMatch.index + frontMatch[0].length
+    : 0;
+  // Back content starts after the BACK LABEL header line
+  const backLineEnd = backMatch
+    ? backMatch.index + backMatch[0].length
+    : text.length;
+
+  const frontContent = text
+    .slice(frontLineEnd, backMatch ? backMatch.index : text.length)
+    .trim();
+  const backContent = backMatch
+    ? text.slice(backLineEnd).trim()
+    : null;
+
+  return {
+    front: frontContent || text.trim(),
+    back:  backContent  || null,
+  };
+}
+
 // Maps the human-readable beverage_type column value from the CSV to the
 // internal code the compliance engine expects (SPIRITS / WINE / MALT).
 function mapCsvBeverageType(raw: string): string | undefined {
@@ -314,6 +350,7 @@ export default function UploadPage() {
   const [labelText, setLabelText] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedSvg, setGeneratedSvg] = useState<string | null>(null);
+  const [generatedBackSvg, setGeneratedBackSvg] = useState<string | null>(null);
   const [isCheckingGenerated, setIsCheckingGenerated] = useState(false);
   const textFileRef = useRef<HTMLInputElement>(null);
 
@@ -392,7 +429,7 @@ export default function UploadPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => { setLabelText(ev.target?.result as string); setGeneratedSvg(null); };
+    reader.onload = (ev) => { setLabelText(ev.target?.result as string); setGeneratedSvg(null); setGeneratedBackSvg(null); };
     reader.readAsText(file);
     if (textFileRef.current) textFileRef.current.value = "";
   };
@@ -401,15 +438,27 @@ export default function UploadPage() {
     if (!labelText.trim()) return;
     setIsGenerating(true);
     setGeneratedSvg(null);
+    setGeneratedBackSvg(null);
     try {
-      const res = await fetch("/api/v1/labels/generate-preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ labelText: labelText.trim() }),
-      });
-      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any).error || "Generation failed."); }
-      const { svg } = await res.json();
-      setGeneratedSvg(svg);
+      const callGenerate = async (text: string): Promise<string> => {
+        const res = await fetch("/api/v1/labels/generate-preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ labelText: text }),
+        });
+        if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any).error || "Generation failed."); }
+        const { svg } = await res.json();
+        return svg as string;
+      };
+
+      // Detect FRONT LABEL: / BACK LABEL: blocks (e.g. from TTB_Labels.txt exports)
+      const { front, back } = splitFrontBack(labelText.trim());
+      const frontSvg = await callGenerate(front);
+      setGeneratedSvg(frontSvg);
+      if (back) {
+        const backSvg = await callGenerate(back);
+        setGeneratedBackSvg(backSvg);
+      }
     } catch (err: any) {
       toast({ title: "Generation failed", description: err.message, variant: "destructive" });
     } finally {
@@ -421,9 +470,11 @@ export default function UploadPage() {
     if (!generatedSvg) return;
     setIsCheckingGenerated(true);
     try {
-      const blob = await svgToBlob(generatedSvg);
       const formData = new FormData();
-      formData.append("file", blob, "generated-label.png");
+      formData.append("file", await svgToBlob(generatedSvg), "generated-label.png");
+      if (generatedBackSvg) {
+        formData.append("backFile", await svgToBlob(generatedBackSvg), "generated-label-back.png");
+      }
       const res = await fetch("/api/v1/labels/upload", { method: "POST", body: formData });
       if (!res.ok) throw new Error("Compliance check failed.");
       const data: LabelAnalysisResult = await res.json();
@@ -796,9 +847,9 @@ export default function UploadPage() {
               <input type="file" ref={textFileRef} className="hidden" accept=".txt,text/plain" onChange={handleTextFileSelect} />
             </div>
             <Textarea
-              placeholder={`Paste label text in any format — structured, free-form, or copied from a document. Examples:\n\nFree-form:\nOLD TOM DISTILLERY\nKentucky Straight Bourbon Whiskey\n45% Alc./Vol. (90 Proof)  ·  750 mL\nBottled by Old Tom Distillery LLC, Louisville KY 40202\nGOVERNMENT WARNING: (1) According to the Surgeon General…\n\nStructured:\nBrand: OLD TOM DISTILLERY\nType: Kentucky Straight Bourbon Whiskey\nABV: 45% Alc./Vol.\nNet Contents: 750 mL\nBottler: Old Tom Distillery LLC, Louisville KY 40202\nGOVERNMENT WARNING: (1) According to the Surgeon General…`}
+              placeholder={`Paste any label text — free-form, copied from a document, or front/back blocks. Examples:\n\nFRONT LABEL:\nOLD TOM DISTILLERY\nKentucky Straight Bourbon Whiskey\n45% Alc./Vol. (90 Proof)  ·  750 mL\n\nBACK LABEL:\nBottled by Old Tom Distillery LLC, Louisville, KY 40202\nGOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.\n\n— or paste without FRONT/BACK headers for single-panel labels`}
               value={labelText}
-              onChange={(e) => { setLabelText(e.target.value); setGeneratedSvg(null); }}
+              onChange={(e) => { setLabelText(e.target.value); setGeneratedSvg(null); setGeneratedBackSvg(null); }}
               disabled={isGenerating}
               className="text-base min-h-64 font-mono leading-relaxed resize-y"
             />
@@ -815,18 +866,33 @@ export default function UploadPage() {
           {generatedSvg && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <p className="text-lg font-bold text-foreground flex items-center gap-2"><CheckCircle className="w-5 h-5 text-pass" /> Label image generated</p>
-                <button onClick={() => { setGeneratedSvg(null); generateLabel(); }} disabled={isGenerating || isCheckingGenerated}
+                <p className="text-lg font-bold text-foreground flex items-center gap-2">
+                  <CheckCircle className="w-5 h-5 text-pass" />
+                  {generatedBackSvg ? "Front & back label images generated" : "Label image generated"}
+                </p>
+                <button onClick={() => { setGeneratedSvg(null); setGeneratedBackSvg(null); generateLabel(); }} disabled={isGenerating || isCheckingGenerated}
                   className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground font-semibold transition-colors">
                   <RefreshCw className="w-4 h-4" /> Regenerate
                 </button>
               </div>
-              <div className="border-2 border-border rounded-xl overflow-hidden bg-secondary/10 flex justify-center p-4">
-                <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(generatedSvg)}`} alt="Generated label preview"
-                  className="max-w-full max-h-[500px] object-contain rounded shadow-md" />
+              <div className={`border-2 border-border rounded-xl overflow-hidden bg-secondary/10 p-4 flex gap-4 justify-center ${generatedBackSvg ? "flex-col sm:flex-row items-start" : ""}`}>
+                <div className="flex flex-col items-center gap-1.5 flex-1">
+                  {generatedBackSvg && <p className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">Front Label</p>}
+                  <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(generatedSvg)}`} alt="Generated front label preview"
+                    className="max-w-full max-h-[500px] object-contain rounded shadow-md" />
+                </div>
+                {generatedBackSvg && (
+                  <div className="flex flex-col items-center gap-1.5 flex-1">
+                    <p className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">Back Label</p>
+                    <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(generatedBackSvg)}`} alt="Generated back label preview"
+                      className="max-w-full max-h-[500px] object-contain rounded shadow-md" />
+                  </div>
+                )}
               </div>
               <div className="flex gap-3 justify-end">
-                <Button variant="outline" size="lg" disabled={isGenerating || isCheckingGenerated} onClick={() => setGeneratedSvg(null)} className="text-base px-6 py-3 h-auto">
+                <Button variant="outline" size="lg" disabled={isGenerating || isCheckingGenerated}
+                  onClick={() => { setGeneratedSvg(null); setGeneratedBackSvg(null); }}
+                  className="text-base px-6 py-3 h-auto">
                   Edit Text &amp; Regenerate
                 </Button>
                 <Button size="lg" disabled={isCheckingGenerated} onClick={checkGeneratedLabel} className="text-lg px-10 py-4 h-auto font-bold">
@@ -856,7 +922,8 @@ export default function UploadPage() {
               ))}
             </ol>
             <p className="text-sm text-muted-foreground mt-3 pt-3 border-t border-primary/10">
-              Expected columns: <code className="bg-secondary px-1 rounded text-xs">application_id, brand_name, class_type, alcohol_content, net_contents, address, is_imported, country_of_origin, beverage_type, age_statement, color_ingredients, commodity_statement, sulfite_aspartame, appellation, foreign_wine_pct</code>
+              Column names are flexible — many variations are recognised automatically (e.g. <code className="bg-secondary px-1 rounded text-xs">brand</code> or <code className="bg-secondary px-1 rounded text-xs">brand_name</code>, <code className="bg-secondary px-1 rounded text-xs">abv</code> or <code className="bg-secondary px-1 rounded text-xs">alcohol_content</code>, <code className="bg-secondary px-1 rounded text-xs">type</code> or <code className="bg-secondary px-1 rounded text-xs">class_type</code>).
+              {" "}For raw label copy, include a <code className="bg-secondary px-1 rounded text-xs">label_text</code> column and optionally a <code className="bg-secondary px-1 rounded text-xs">back_label</code> column — the structured-field columns are ignored when raw text is present.
             </p>
           </div>
 
