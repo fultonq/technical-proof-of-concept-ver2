@@ -46,7 +46,7 @@ Return ONLY a valid JSON object (no markdown, no code blocks, just raw JSON) wit
     "location": "<where on label: 'front label', 'back label', 'side label', 'bottom', 'cap/closure', 'foil capsule', or null>"
   },
   "bottlerProducer": {
-    "value": "<bottler/brewer/producer/packer name and full address, or null>",
+    "value": "<name and full address of bottler, brewer, producer, packer, OR importer — accept any of: 'BOTTLED BY X', 'BREWED BY X', 'PRODUCED BY X', 'PACKED BY X', 'IMPORTED BY X', 'DISTRIBUTED BY X', or just the name and address without a prefix; null only if completely absent>",
     "confidence": <0.0-1.0>
   },
   "countryOfOrigin": {
@@ -72,9 +72,9 @@ Return ONLY a valid JSON object (no markdown, no code blocks, just raw JSON) wit
     "details": "<description of what mandatory info is on prohibited surface, or null>"
   },
   "appellationOfOrigin": <FOR WINE ONLY — null for SPIRITS and MALT> | {
-    "value": "<appellation text e.g. 'Napa Valley', 'California', 'Bordeaux', or null if not stated>",
+    "value": "<appellation text e.g. 'Napa Valley', 'California', 'American', 'Bordeaux', 'Victoria', 'Marlborough', or null if not stated>",
     "confidence": <0.0-1.0>,
-    "isMandatory": <true if the wine uses a varietal designation (e.g. 'Chardonnay', 'Cabernet Sauvignon') or a vintage year, which require an appellation per 27 CFR 4.23>
+    "isMandatory": <true if EITHER (a) a varietal designation is used (e.g. 'Chardonnay', 'Merlot', 'Cabernet Sauvignon', 'Shiraz') OR (b) a vintage year is stated (e.g. '2007', '2019', any 4-digit year) — both trigger 27 CFR 4.23 mandatory appellation requirement>
   },
   "sulfiteDeclaration": <FOR WINE ONLY — null for SPIRITS and MALT> | {
     "value": "<verbatim sulfite declaration text e.g. 'Contains sulfites', 'Contains (a) sulfiting agent(s)', 'No sulfites added', or null if absent>",
@@ -92,7 +92,7 @@ IMPORTANT INSTRUCTIONS:
 5. Low confidence (<0.6) should be assigned to any field that is partially occluded, blurry, angled, or ambiguous
 6. sameFieldOfVision: ONLY for SPIRITS (set null for WINE/MALT). Checks that Brand Name, Class/Type, and ABV are all visible on the same panel without rotating the container
 7. appellationOfOrigin and sulfiteDeclaration: ONLY for WINE (set null for SPIRITS/MALT)
-8. countryOfOrigin for WINE: ALWAYS provide a value. If no explicit "Country of Origin" line exists, infer from the appellation — e.g. "American Merlot" or "California Chardonnay" → value="United States", isDomestic=true; "Bordeaux" → value="France", isDomestic=false. US appellations (American, California, Napa Valley, Oregon, Washington, etc.) all map to value="United States".
+8. countryOfOrigin for WINE: ALWAYS provide a value. Accepted formats include: explicit "Country of Origin: X", "PRODUCT OF X", "Product of X", "Imported from X", or inferred from the appellation — e.g. "American Merlot" or "California Chardonnay" → value="United States", isDomestic=true; "Bordeaux" or "Victoria" (Australian region) → value="France"/"Australia", isDomestic=false. US appellations (American, California, Napa Valley, Oregon, Washington, New York, etc.) → value="United States", isDomestic=true.
 9. ABV formats — all of these are valid: "40% Alc./Vol.", "40% ABV", "ALC. 15.5% BY VOL.", "ALC 40% BY VOL", "13.5% alc/vol", "6% alcohol by volume", "80 Proof". Extract verbatim.
 10. Respond with ONLY the JSON object — no additional text, explanation, or formatting`;
 
