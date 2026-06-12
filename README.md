@@ -12,18 +12,17 @@ Handles all three label types: **Beer/Malt Beverage (27 CFR Part 7)**, **Distill
 
 ### Prerequisites
 
-- Node.js 20+
-- pnpm 9+ (`npm install -g pnpm`)
-- An Anthropic API key — or use Replit's built-in Anthropic integration (no key needed)
+- Node.js 24 LTS
+- pnpm 10+ (`npm install -g pnpm@latest`)
+- An Anthropic API key — or use Replit's built-in Anthropic integration (no key needed on Replit)
 
 ### Environment Variables
 
 | Variable | Required | Description |
 |---|---|---|
-| `AI_INTEGRATIONS_ANTHROPIC_BASE_URL` | Yes | Anthropic API base URL (auto-set in Replit) |
-| `AI_INTEGRATIONS_ANTHROPIC_API_KEY` | Yes | Anthropic API key (auto-set in Replit) |
-| `SESSION_SECRET` | Yes | Express session secret |
-| `DATABASE_URL` | No | Not used — in-memory store for PoC |
+| `AI_INTEGRATIONS_ANTHROPIC_BASE_URL` | Yes | Anthropic API base URL (auto-set in Replit; set manually otherwise) |
+| `AI_INTEGRATIONS_ANTHROPIC_API_KEY` | Yes | Anthropic API key (auto-set in Replit; set manually otherwise) |
+| `SESSION_SECRET` | Yes | Any random string used to sign Express sessions |
 
 ### Run locally
 

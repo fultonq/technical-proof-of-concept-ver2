@@ -10,10 +10,11 @@
 
 1. [Introduction and Problem Statement](#1-introduction-and-problem-statement)
 2. [The Solution](#2-the-solution)
-3. [User Guide](#3-user-guide)
-4. [Implementation Framework](#4-implementation-framework)
-5. [Project File Structure](#5-project-file-structure)
-6. [Key Files in Detail](#6-key-files-in-detail)
+3. [Setup and Run Instructions](#3-setup-and-run-instructions)
+4. [User Guide](#4-user-guide)
+5. [Implementation Framework](#5-implementation-framework)
+6. [Project File Structure](#6-project-file-structure)
+7. [Key Files in Detail](#7-key-files-in-detail)
 
 ---
 
@@ -97,7 +98,79 @@ Each submission receives one of three verdicts:
 
 ---
 
-## 3. User Guide
+## 3. Setup and Run Instructions
+
+This section is for developers or technical staff who need to run the application locally or deploy it to a server.
+
+### Prerequisites
+
+| Requirement | Version |
+|---|---|
+| Node.js | 24 LTS |
+| pnpm | 10+ |
+| Anthropic API access | Claude claude-sonnet-4-6 (or Replit Anthropic integration) |
+
+### Environment Variables
+
+Create a `.env` file in the project root (or set these as system environment variables):
+
+| Variable | Required | Description |
+|---|---|---|
+| `AI_INTEGRATIONS_ANTHROPIC_BASE_URL` | Yes | Anthropic API base URL. Auto-set by Replit; for local dev use `https://api.anthropic.com` |
+| `AI_INTEGRATIONS_ANTHROPIC_API_KEY` | Yes | Your Anthropic API key. Auto-set by Replit integration. |
+| `SESSION_SECRET` | Yes | Any random string (e.g. output of `openssl rand -hex 32`). Signs Express session cookies. |
+
+### Running Locally
+
+```bash
+# 1. Install dependencies
+pnpm install
+
+# 2. Start the API server (terminal 1)
+pnpm --filter @workspace/api-server run dev
+# API is available at http://localhost:8080/api
+
+# 3. Start the React frontend (terminal 2)
+pnpm --filter @workspace/ttb-label-review run dev
+# Frontend is available at http://localhost:5173
+```
+
+Both services must be running simultaneously. The frontend calls the API at `/api` (proxied by Vite in development).
+
+### Running on Replit
+
+Open the project in Replit. Both workflows (`API Server` and `web`) start automatically. The Anthropic integration is pre-wired — no API key configuration is needed.
+
+### Building for Production
+
+```bash
+# Typecheck + build all packages
+pnpm run build
+
+# The API server bundle is output to:
+#   artifacts/api-server/dist/index.mjs
+#
+# The React frontend bundle is output to:
+#   artifacts/ttb-label-review/dist/public/
+#
+# In production, the Express server serves the React bundle as static files.
+# Start with:
+node --enable-source-maps artifacts/api-server/dist/index.mjs
+```
+
+### Regenerating API Client Code
+
+If you change `lib/api-spec/openapi.yaml`, regenerate the TypeScript client and Zod validators:
+
+```bash
+pnpm --filter @workspace/api-spec run codegen
+```
+
+Never edit files inside `lib/api-client-react/src/generated/` or `lib/api-zod/src/generated/` by hand — they are overwritten by codegen.
+
+---
+
+## 4. User Guide
 
 This guide is written for all reviewers who will use the TTB Label Review tool. No technical background is needed. If you can use a web browser, you can use this tool.
 
@@ -199,7 +272,7 @@ Click on any label in the results table to open its detail page. This page shows
 
 ---
 
-## 4. Implementation Framework
+## 5. Implementation Framework
 
 ### Technology Stack
 
@@ -256,7 +329,7 @@ The project was built contract-first:
 
 ---
 
-## 5. Project File Structure
+## 6. Project File Structure
 
 ```
 workspace/                          ← Monorepo root
@@ -324,7 +397,7 @@ workspace/                          ← Monorepo root
 
 ---
 
-## 6. Key Files in Detail
+## 7. Key Files in Detail
 
 ### `compliance-engine.ts`
 
