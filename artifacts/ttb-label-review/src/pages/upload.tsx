@@ -17,6 +17,7 @@ import { parseLabelCSV, rowToLabelText, type CsvLabelRow } from "@/lib/csv-label
 import { exportSessionToCSV } from "@/lib/csv-export";
 import { generatePrintReport } from "@/lib/print-report";
 import { saveSession, getOrCreateActiveSessionId, resetActiveSessionId } from "@/lib/session-history";
+import { saveThumbnail, fileToThumbnailDataUrl, svgToThumbnailDataUrl } from "@/lib/label-thumbnails";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -389,6 +390,7 @@ export default function UploadPage() {
       const res = await fetch("/api/v1/labels/upload", { method: "POST", body: formData });
       if (!res.ok) throw new Error("Upload failed — please try again.");
       const data: LabelAnalysisResult = await res.json();
+      fileToThumbnailDataUrl(singleFile).then(url => saveThumbnail(data.labelId, url)).catch(() => {});
       saveSession({ sessionId: activeSessionId, type: "single", labelCount: 1, fileName: singleFile.name });
       setLocation(`/results/${activeSessionId}`);
     } catch (err: any) {
@@ -412,6 +414,7 @@ export default function UploadPage() {
         const res = await fetch("/api/v1/labels/upload", { method: "POST", body: formData });
         if (!res.ok) throw new Error("Failed to process " + qf.file.name);
         const data: LabelAnalysisResult = await res.json();
+        fileToThumbnailDataUrl(qf.file).then(url => saveThumbnail(data.labelId, url)).catch(() => {});
         setBatchQueue(prev => prev.map(f => f.id === qf.id ? { ...f, status: "complete", result: data } : f));
       } catch (err: any) {
         setBatchQueue(prev => prev.map(f => f.id === qf.id ? { ...f, status: "error", error: err.message } : f));
@@ -478,6 +481,7 @@ export default function UploadPage() {
       const res = await fetch("/api/v1/labels/upload", { method: "POST", body: formData });
       if (!res.ok) throw new Error("Compliance check failed.");
       const data: LabelAnalysisResult = await res.json();
+      saveThumbnail(data.labelId, svgToThumbnailDataUrl(generatedSvg));
       saveSession({ sessionId: activeSessionId, type: "generate", labelCount: 1 });
       setLocation(`/results/${activeSessionId}`);
     } catch (err: any) {
@@ -587,6 +591,7 @@ export default function UploadPage() {
         });
         if (!res.ok) throw new Error("Compliance check failed");
         const result: LabelAnalysisResult = await res.json();
+        saveThumbnail(result.labelId, svgToThumbnailDataUrl(svg));
         setCsvRows(prev => prev.map(r => r.rowId === row.rowId ? { ...r, status: "complete", result } : r));
       } catch (err: any) {
         if (err.name === "AbortError") {

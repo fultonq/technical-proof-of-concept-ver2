@@ -12,8 +12,9 @@ import {
 import {
   ArrowLeft, Download, Plus, Search, Loader2, AlertCircle,
   CheckCircle2, XCircle, Clock, MessageSquare, Printer, ShieldCheck, ShieldX, ShieldAlert,
-  UploadCloud,
+  UploadCloud, ImageOff,
 } from "lucide-react";
+import { getThumbnail } from "@/lib/label-thumbnails";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
@@ -30,6 +31,18 @@ export default function ResultsPage() {
   });
 
   const [searchTerm, setSearchTerm] = React.useState("");
+
+  // ── Thumbnails — loaded from sessionStorage (saved by upload.tsx) ──────────
+  const [thumbnails, setThumbnails] = React.useState<Record<string, string>>({});
+  React.useEffect(() => {
+    if (!sessionData) return;
+    const map: Record<string, string> = {};
+    for (const r of sessionData.results) {
+      const url = getThumbnail(r.labelId);
+      if (url) map[r.labelId] = url;
+    }
+    setThumbnails(map);
+  }, [sessionData]);
 
   // ── Add label to existing session ─────────────────────────────────────────
   const addFileRef = React.useRef<HTMLInputElement>(null);
@@ -267,6 +280,7 @@ export default function ResultsPage() {
             <thead className="bg-muted border-b border-border">
               <tr>
                 <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">Label File</th>
+                <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">Preview</th>
                 <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">Brand Found</th>
                 <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">AI Result</th>
                 <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">Issues</th>
@@ -277,7 +291,7 @@ export default function ResultsPage() {
             <tbody className="divide-y divide-border">
               {filteredResults.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-16 text-center text-lg text-muted-foreground">
+                  <td colSpan={7} className="px-5 py-16 text-center text-lg text-muted-foreground">
                     No labels match your search.
                   </td>
                 </tr>
@@ -293,6 +307,19 @@ export default function ResultsPage() {
                       <tr className="hover:bg-secondary/20 transition-colors">
                         <td className="px-5 py-4 font-medium text-base text-foreground max-w-[220px] truncate" title={result.fileName}>
                           {result.fileName}
+                        </td>
+                        <td className="px-3 py-2">
+                          {thumbnails[result.labelId] ? (
+                            <img
+                              src={thumbnails[result.labelId]}
+                              alt={`Preview of ${result.fileName}`}
+                              className="h-14 w-10 object-contain rounded border border-border bg-white shadow-sm"
+                            />
+                          ) : (
+                            <div className="h-14 w-10 flex items-center justify-center rounded border border-border bg-muted text-muted-foreground/40">
+                              <ImageOff className="w-4 h-4" />
+                            </div>
+                          )}
                         </td>
                         <td className="px-5 py-4 text-base text-foreground">
                           {result.brandName.extractedValue
@@ -353,7 +380,7 @@ export default function ResultsPage() {
                       {/* Expandable comment row */}
                       {isCommentOpen && (
                         <tr>
-                          <td colSpan={6} className="px-5 py-4 bg-secondary/10 border-b border-primary/10">
+                          <td colSpan={7} className="px-5 py-4 bg-secondary/10 border-b border-primary/10">
                             <div className="flex items-start gap-3 max-w-2xl">
                               <MessageSquare className="w-4 h-4 text-primary mt-2.5 shrink-0" />
                               <div className="flex-1">
