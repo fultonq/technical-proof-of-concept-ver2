@@ -614,6 +614,20 @@ export default function UploadPage() {
   const csvCompleteCount = csvRows.filter(r => r.status === "complete").length;
   const csvErrorCount = csvRows.filter(r => r.status === "error").length;
   const csvPendingCount = csvRows.filter(r => r.status === "pending" || r.status === "error").length;
+
+  // Stop processing (if running) and navigate — to partial results if any
+  // completed, otherwise back to the upload home screen.
+  const handleCancelImport = () => {
+    cancelRef.current = true;
+    abortControllerRef.current?.abort();
+    if (csvCompleteCount > 0) {
+      setLocation(`/results/${activeSessionId}`);
+    } else {
+      setCsvRows([]);
+      setCsvFileName(null);
+      setLocation("/");
+    }
+  };
   const pendingBatchCount = batchQueue.filter(f => f.status === "pending" || f.status === "error").length;
 
   const BEVERAGE_TYPE_SHORT: Record<string, string> = {
@@ -1151,7 +1165,7 @@ export default function UploadPage() {
               {/* ── Actions ─────────────────────────────────────────────── */}
               <div className="space-y-3 pt-2">
 
-                {/* While processing: live progress + immediate Stop */}
+                {/* While processing: live progress + Stop / Cancel */}
                 {isCsvProcessing && (
                   <div className="flex items-center justify-between gap-4 flex-wrap">
                     <div className="flex items-center gap-2.5 text-muted-foreground">
@@ -1168,17 +1182,27 @@ export default function UploadPage() {
                         ) : "Starting…"}
                       </span>
                     </div>
-                    <Button
-                      size="lg"
-                      variant="outline"
-                      className="border-fail/60 text-fail hover:bg-fail/5 font-bold"
-                      onClick={() => {
-                        cancelRef.current = true;
-                        abortControllerRef.current?.abort();
-                      }}
-                    >
-                      <StopCircle className="w-5 h-5 mr-2" /> Stop
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="lg"
+                        variant="outline"
+                        className="border-fail/60 text-fail hover:bg-fail/5 font-bold"
+                        onClick={() => {
+                          cancelRef.current = true;
+                          abortControllerRef.current?.abort();
+                        }}
+                      >
+                        <StopCircle className="w-5 h-5 mr-2" /> Stop
+                      </Button>
+                      <Button
+                        size="lg"
+                        variant="ghost"
+                        className="text-muted-foreground hover:text-foreground font-semibold"
+                        onClick={handleCancelImport}
+                      >
+                        <X className="w-4 h-4 mr-2" /> Cancel Import
+                      </Button>
+                    </div>
                   </div>
                 )}
 
@@ -1253,17 +1277,28 @@ export default function UploadPage() {
                       <span className="text-sm text-muted-foreground">label{batchSize !== 1 ? "s" : ""} at a time</span>
                     </div>
 
-                    {/* Generate button */}
-                    <Button
-                      size="lg"
-                      onClick={() => processCsvRows(batchSize)}
-                      className="text-lg px-10 py-4 h-auto font-bold"
-                    >
-                      <Wand2 className="w-5 h-5 mr-3" />
-                      {batchSize === null
-                        ? `Generate & Check All ${csvPendingCount} Remaining`
-                        : `Generate ${Math.min(batchSize, csvPendingCount)} Label${Math.min(batchSize, csvPendingCount) !== 1 ? "s" : ""}`}
-                    </Button>
+                    {/* Generate + Cancel buttons */}
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <Button
+                        size="lg"
+                        onClick={() => processCsvRows(batchSize)}
+                        className="text-lg px-10 py-4 h-auto font-bold"
+                      >
+                        <Wand2 className="w-5 h-5 mr-3" />
+                        {batchSize === null
+                          ? `Generate & Check All ${csvPendingCount} Remaining`
+                          : `Generate ${Math.min(batchSize, csvPendingCount)} Label${Math.min(batchSize, csvPendingCount) !== 1 ? "s" : ""}`}
+                      </Button>
+                      <Button
+                        size="lg"
+                        variant="ghost"
+                        className="text-muted-foreground hover:text-foreground font-semibold px-6 py-4 h-auto"
+                        onClick={handleCancelImport}
+                      >
+                        <X className="w-4 h-4 mr-2" />
+                        {csvCompleteCount > 0 ? "Cancel & View Results" : "Cancel Import"}
+                      </Button>
+                    </div>
                   </div>
                 )}
 
