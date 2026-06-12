@@ -12,6 +12,7 @@ const statusBadgeVariants = cva(
         REVIEW: "bg-review/15 text-review border border-review/30",
         NEEDS_REVIEW: "bg-review/15 text-review border border-review/30",
         NOT_APPLICABLE: "bg-muted text-muted-foreground border border-muted-foreground/30",
+        NOT_ALCOHOL: "bg-muted text-muted-foreground border border-muted-foreground/30",
         ERROR: "bg-fail/15 text-fail border border-fail/30",
         WARNING: "bg-review/15 text-review border border-review/30",
         INFO: "bg-blue-500/15 text-blue-700 border border-blue-500/30",
@@ -24,6 +25,19 @@ const statusBadgeVariants = cva(
   }
 );
 
+const STATUS_LABELS: Record<string, string> = {
+  PASS: "Pass",
+  FAIL: "Fail",
+  REVIEW: "Needs Review",
+  NEEDS_REVIEW: "Needs Review",
+  NOT_APPLICABLE: "Not applicable",
+  NOT_ALCOHOL: "Not applicable",
+  ERROR: "Error",
+  WARNING: "Warning",
+  INFO: "Info",
+  UNKNOWN: "Unknown",
+};
+
 export interface StatusBadgeProps
   extends React.HTMLAttributes<HTMLDivElement>,
     VariantProps<typeof statusBadgeVariants> {
@@ -31,15 +45,16 @@ export interface StatusBadgeProps
 }
 
 export function StatusBadge({ className, status, ...props }: StatusBadgeProps) {
-  let normalizedStatus = String(status).toUpperCase();
-  // Handle mapping from api types to badge variants if needed
-  if (!statusBadgeVariants({ status: normalizedStatus as any }).includes(normalizedStatus)) {
-      if (normalizedStatus === 'NEEDS_REVIEW') normalizedStatus = 'REVIEW';
-  }
+  const raw = String(status ?? "").toUpperCase();
+
+  let normalized = raw;
+  if (raw === "NEEDS_REVIEW") normalized = "NEEDS_REVIEW";
+
+  const label = STATUS_LABELS[normalized] ?? raw.replace(/_/g, " ");
 
   return (
-    <div className={cn(statusBadgeVariants({ status: normalizedStatus as any }), className)} {...props}>
-      {status ? String(status).replace(/_/g, ' ') : "UNKNOWN"}
+    <div className={cn(statusBadgeVariants({ status: normalized as any }), className)} {...props}>
+      {label}
     </div>
   );
 }

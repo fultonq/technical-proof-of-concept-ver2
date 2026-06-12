@@ -242,9 +242,9 @@ export default function LabelDetailPage() {
       <div className="bg-card border-b border-border px-6 py-5 shadow-sm">
         <div className="max-w-5xl mx-auto">
           <div className="flex items-center gap-2 text-base text-muted-foreground mb-1">
-            <Link href="/" className="hover:text-primary">Upload</Link>
+            <Link href="/" className="hover:text-primary">Home</Link>
             <span>/</span>
-            <Link href={`/results/${sessionId}`} className="hover:text-primary">Results</Link>
+            <Link href={`/results/${sessionId}`} className="hover:text-primary">Session Results</Link>
             <span>/</span>
             <span className="truncate max-w-[200px] text-foreground font-medium">{result.fileName}</span>
           </div>

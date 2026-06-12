@@ -62,6 +62,7 @@
   --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
   --color-sidebar-accent-border: var(--sidebar-accent-border);
   --color-sidebar-ring: hsl(var(--sidebar-ring));
+  --color-gold: hsl(var(--gold));
 
   --font-sans: var(--app-font-sans);
   --font-serif: var(--app-font-serif);
@@ -91,14 +92,15 @@
   --card-foreground: 222 47% 11%;
   --card-border: 214 32% 91%;
   
-  --sidebar: 0 0% 100%;
-  --sidebar-foreground: 222 47% 11%;
-  --sidebar-border: 214 32% 91%;
-  --sidebar-primary: 214 100% 21%;
+  --sidebar: 214 47% 13%;
+  --sidebar-foreground: 210 20% 88%;
+  --sidebar-border: 214 47% 20%;
+  --sidebar-primary: 214 100% 55%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 210 40% 96%;
-  --sidebar-accent-foreground: 222 47% 11%;
-  --sidebar-ring: 214 100% 21%;
+  --sidebar-accent: 214 47% 20%;
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-ring: 214 100% 55%;
+  --gold: 43 74% 55%;
   
   --popover: 0 0% 100%;
   --popover-foreground: 222 47% 11%;
@@ -210,6 +212,7 @@
   --fail-foreground: 0 0% 100%;
   --review: 39 100% 50%;
   --review-foreground: 0 0% 100%;
+  --gold: 43 74% 55%;
 
   --input: 217 33% 17%;
   --ring: 214 100% 45%;

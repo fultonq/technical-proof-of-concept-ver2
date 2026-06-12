@@ -116,9 +116,9 @@ export default function ManagePage() {
           <ArrowLeft className="w-5 h-5" />
         </button>
         <div>
-          <h2 className="text-3xl font-bold tracking-tight text-foreground">Manage Labels</h2>
+          <h2 className="text-3xl font-bold tracking-tight text-foreground">My Batches</h2>
           <p className="text-lg text-muted-foreground mt-1">
-            Review processed sessions, generate reports, and inspect results by beverage type.
+            Review saved batches, generate reports, and inspect results by beverage type.
           </p>
         </div>
       </div>

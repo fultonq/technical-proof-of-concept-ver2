@@ -1,0 +1,1 @@
+- [V2 shell architecture](v2-shell-architecture.md) — AppShell/WizardBar/HelpBar pattern for the government UI; sidebar uses CSS vars not Tailwind class names directly.
