@@ -148,7 +148,7 @@ export default function ResultsPage() {
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
               <Link href="/" className="inline-flex items-center gap-1 text-base text-muted-foreground hover:text-primary mb-2">
-                <ArrowLeft className="w-4 h-4" /> Upload another label
+                <ArrowLeft className="w-4 h-4" /> Back to Dashboard
               </Link>
               <h2 className="text-3xl font-bold text-foreground">Review Results</h2>
               <p className="text-base text-muted-foreground mt-1">
