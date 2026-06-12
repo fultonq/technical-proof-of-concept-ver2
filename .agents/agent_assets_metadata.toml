@@ -23,3 +23,9 @@ id = "xrgcaDqGiY6zNhh-uSbXz"
 uri = "file://TTB_Label_Review_Deliverable.md"
 type = "text"
 title = "TTB Label Review — Project Deliverable"
+
+[[outputs]]
+id = "PxKsXhVUWRJysq2TPlJoV"
+uri = "file://TTB_Label_Review_Deliverable.docx"
+type = "word_document"
+title = "TTB Label Review — Project Deliverable"
