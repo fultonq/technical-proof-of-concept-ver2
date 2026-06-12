@@ -35,3 +35,9 @@ id = "BGIKa7_UwqCTrnY_PDyiA"
 uri = "file://TTB_Label_Review_Backup.tar.gz"
 type = "unspecified"
 title = "TTB Label Review — Project Backup"
+
+[[outputs]]
+id = "0k1Y6vSQsd9xEuIFS8gWO"
+uri = "file://TTB_Label_Review_v2_Backup.tar.gz"
+type = "unspecified"
+title = "TTB Label Review v2 — Project Backup"
