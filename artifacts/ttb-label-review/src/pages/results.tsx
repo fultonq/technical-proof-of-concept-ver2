@@ -44,6 +44,9 @@ export default function ResultsPage() {
     setThumbnails(map);
   }, [sessionData]);
 
+  // ── Lightbox — clicking a thumbnail shows a medium popup ──────────────────
+  const [lightbox, setLightbox] = React.useState<{ src: string; alt: string } | null>(null);
+
   // ── Add label to existing session ─────────────────────────────────────────
   const addFileRef = React.useRef<HTMLInputElement>(null);
   const [isAdding, setIsAdding] = React.useState(false);
@@ -153,6 +156,33 @@ export default function ResultsPage() {
 
   return (
     <div className="flex-1 flex flex-col">
+
+      {/* ── Lightbox modal ───────────────────────────────────────────────── */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={() => setLightbox(null)}
+        >
+          <div
+            className="relative bg-white rounded-2xl shadow-2xl p-3 max-w-sm w-full mx-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setLightbox(null)}
+              className="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-foreground text-background flex items-center justify-center text-sm font-bold shadow hover:bg-foreground/80 transition-colors"
+              aria-label="Close preview"
+            >
+              ✕
+            </button>
+            <img
+              src={lightbox.src}
+              alt={lightbox.alt}
+              className="w-full rounded-lg object-contain max-h-[70vh]"
+            />
+            <p className="text-xs text-center text-muted-foreground mt-2 truncate px-1">{lightbox.alt}</p>
+          </div>
+        </div>
+      )}
 
       {/* ── Summary bar ─────────────────────────────────────────────────── */}
       <div className="bg-card border-b border-border shadow-sm">
@@ -310,11 +340,17 @@ export default function ResultsPage() {
                         </td>
                         <td className="px-3 py-2">
                           {thumbnails[result.labelId] ? (
-                            <img
-                              src={thumbnails[result.labelId]}
-                              alt={`Preview of ${result.fileName}`}
-                              className="h-14 w-10 object-contain rounded border border-border bg-white shadow-sm"
-                            />
+                            <button
+                              onClick={() => setLightbox({ src: thumbnails[result.labelId], alt: result.fileName })}
+                              className="block focus:outline-none focus:ring-2 focus:ring-ring rounded"
+                              title="Click to enlarge"
+                            >
+                              <img
+                                src={thumbnails[result.labelId]}
+                                alt={`Preview of ${result.fileName}`}
+                                className="h-14 w-10 object-contain rounded border border-border bg-white shadow-sm hover:shadow-md hover:scale-105 transition-transform cursor-zoom-in"
+                              />
+                            </button>
                           ) : (
                             <div className="h-14 w-10 flex items-center justify-center rounded border border-border bg-muted text-muted-foreground/40">
                               <ImageOff className="w-4 h-4" />
