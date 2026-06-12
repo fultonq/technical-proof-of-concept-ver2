@@ -14,7 +14,7 @@ import {
   CheckCircle2, XCircle, Clock, MessageSquare, Printer, ShieldCheck, ShieldX, ShieldAlert,
   UploadCloud, ImageOff,
 } from "lucide-react";
-import { getThumbnail } from "@/lib/label-thumbnails";
+import { getThumbnail, getFullImage } from "@/lib/label-thumbnails";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
@@ -34,14 +34,19 @@ export default function ResultsPage() {
 
   // ── Thumbnails — loaded from sessionStorage (saved by upload.tsx) ──────────
   const [thumbnails, setThumbnails] = React.useState<Record<string, string>>({});
+  const [fullImages, setFullImages] = React.useState<Record<string, string>>({});
   React.useEffect(() => {
     if (!sessionData) return;
-    const map: Record<string, string> = {};
+    const thumbMap: Record<string, string> = {};
+    const fullMap: Record<string, string> = {};
     for (const r of sessionData.results) {
-      const url = getThumbnail(r.labelId);
-      if (url) map[r.labelId] = url;
+      const thumb = getThumbnail(r.labelId);
+      if (thumb) thumbMap[r.labelId] = thumb;
+      const full = getFullImage(r.labelId);
+      if (full) fullMap[r.labelId] = full;
     }
-    setThumbnails(map);
+    setThumbnails(thumbMap);
+    setFullImages(fullMap);
   }, [sessionData]);
 
   // ── Lightbox — clicking a thumbnail shows a medium popup ──────────────────
@@ -341,7 +346,7 @@ export default function ResultsPage() {
                         <td className="px-3 py-2">
                           {thumbnails[result.labelId] ? (
                             <button
-                              onClick={() => setLightbox({ src: thumbnails[result.labelId], alt: result.fileName })}
+                              onClick={() => setLightbox({ src: fullImages[result.labelId] ?? thumbnails[result.labelId], alt: result.fileName })}
                               className="block focus:outline-none focus:ring-2 focus:ring-ring rounded"
                               title="Click to enlarge"
                             >
