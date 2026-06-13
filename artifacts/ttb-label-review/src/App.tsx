@@ -10,6 +10,7 @@ import AnalyticsPage from "@/pages/analytics";
 import LabelDetailPage from "@/pages/label-detail";
 import ManagePage from "@/pages/manage";
 import HelpPage from "@/pages/help";
+import SettingsPage from "@/pages/settings";
 import { AppShell } from "@/components/app-shell";
 import { WizardBar } from "@/components/wizard-bar";
 import { HelpBar } from "@/components/help-bar";
@@ -29,6 +30,7 @@ function Router() {
           <Route path="/results/:sessionId" component={ResultsPage} />
           <Route path="/results/:sessionId/:labelId" component={LabelDetailPage} />
           <Route path="/help" component={HelpPage} />
+          <Route path="/settings" component={SettingsPage} />
           <Route component={NotFound} />
         </Switch>
       </main>
