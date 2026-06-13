@@ -1,5 +1,5 @@
 import React from "react";
-import { useRoute, Link } from "wouter";
+import { useRoute, useSearch, useLocation, Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import { useGetSessionResults, getGetSessionResultsQueryKey } from "@workspace/api-client-react";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -30,12 +30,42 @@ export default function ResultsPage() {
     query: { enabled: !!sessionId, queryKey: getGetSessionResultsQueryKey(sessionId) },
   });
 
-  const [searchTerm, setSearchTerm] = React.useState("");
-  const [statusFilter, setStatusFilter] = React.useState<string>("ALL");
-  const [beverageFilter, setBeverageFilter] = React.useState<string>("ALL");
+  // ── URL-persisted filter & sort state ─────────────────────────────────────
+  const search = useSearch();
+  const [, navigate] = useLocation();
+  const urlParams = new URLSearchParams(search);
+
   type SortKey = "fileName" | "brand" | "status" | "issues" | "date";
-  const [sortKey, setSortKey] = React.useState<SortKey | null>(null);
-  const [sortDir, setSortDir] = React.useState<"asc" | "desc">("asc");
+  const VALID_SORT_KEYS: SortKey[] = ["fileName", "brand", "status", "issues", "date"];
+
+  const [searchTerm, setSearchTerm] = React.useState("");
+  const [statusFilter, setStatusFilter] = React.useState<string>(
+    urlParams.get("status") ?? "ALL",
+  );
+  const [beverageFilter, setBeverageFilter] = React.useState<string>(
+    urlParams.get("type") ?? "ALL",
+  );
+  const rawSort = urlParams.get("sort") as SortKey | null;
+  const [sortKey, setSortKey] = React.useState<SortKey | null>(
+    rawSort && VALID_SORT_KEYS.includes(rawSort) ? rawSort : null,
+  );
+  const rawDir = urlParams.get("dir");
+  const [sortDir, setSortDir] = React.useState<"asc" | "desc">(
+    rawDir === "desc" ? "desc" : "asc",
+  );
+
+  // Sync filter/sort state back to URL (replace so every pill click doesn't
+  // push a new history entry, but the current URL is always bookmarkable).
+  React.useEffect(() => {
+    const p = new URLSearchParams();
+    if (statusFilter !== "ALL") p.set("status", statusFilter);
+    if (beverageFilter !== "ALL") p.set("type", beverageFilter);
+    if (sortKey) p.set("sort", sortKey);
+    if (sortKey && sortDir !== "asc") p.set("dir", sortDir);
+    const qs = p.toString();
+    navigate(`/results/${sessionId}${qs ? `?${qs}` : ""}`, { replace: true });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, beverageFilter, sortKey, sortDir, sessionId]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
