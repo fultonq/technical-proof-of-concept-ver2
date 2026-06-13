@@ -7,13 +7,14 @@ import type {
 import { getGetSessionResultsQueryKey } from "@workspace/api-client-react";
 import { getSessions, type SessionRecord } from "@/lib/session-history";
 import { getSessionReviewActions } from "@/lib/review-actions";
+import { exportAnalyticsCSV, type AnalyticsFieldEntry } from "@/lib/csv-export";
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, Legend,
   LineChart, Line, ResponsiveContainer, CartesianGrid,
 } from "recharts";
 import {
   Loader2, FolderOpen, TrendingUp, CheckCircle2,
-  BarChart2, AlertTriangle, RefreshCw,
+  BarChart2, AlertTriangle, RefreshCw, Download, Filter, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -43,6 +44,9 @@ const FIELD_ACCESSORS: Array<[string, (r: LabelAnalysisResult) => FieldResult | 
   ["Appellation",       r => r.appellationOfOrigin],
   ["Sulfite Declaration",r => r.sulfiteDeclaration],
 ];
+
+const BEVERAGE_TYPES = ["ALL", "SPIRITS", "WINE", "MALT"] as const;
+type BeverageFilter = typeof BEVERAGE_TYPES[number];
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface FlatResult extends LabelAnalysisResult {
@@ -84,17 +88,10 @@ function useAnalyticsData() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queries.map(q => q.status).join(","), sessions]);
 
-  const reviewActions = React.useMemo(
-    () => getSessionReviewActions(flatResults.map(r => r.labelId)),
-    [flatResults],
-  );
-
-  return { sessions, flatResults, reviewActions, isLoading, hasAnyData, unavailableCount };
+  return { sessions, flatResults, isLoading, hasAnyData, unavailableCount };
 }
 
 // ── Aggregation ────────────────────────────────────────────────────────────────
-interface FailureEntry { field: string; rate: number; failed: number; counted: number }
-
 function computeMetrics(
   flatResults: FlatResult[],
   reviewActions: ReturnType<typeof getSessionReviewActions>,
@@ -142,7 +139,7 @@ function computeMetrics(
 
   // ── Field failure rates ────────────────────────────────────────────────────
   // FieldResult fields: read matchStatus ("PASS" | "FAIL" | "NEEDS_REVIEW" | "NOT_APPLICABLE")
-  const fieldFailData: FailureEntry[] = [];
+  const fieldFailData: AnalyticsFieldEntry[] = [];
 
   for (const [label, accessor] of FIELD_ACCESSORS) {
     let failed = 0, counted = 0;
@@ -278,15 +275,139 @@ function ChartTip({
   );
 }
 
+// ── Filter bar ────────────────────────────────────────────────────────────────
+function FilterBar({
+  dateFrom, dateTo, beverageType,
+  onDateFrom, onDateTo, onBeverageType, onClear,
+  activeFilterCount,
+}: {
+  dateFrom: string;
+  dateTo: string;
+  beverageType: BeverageFilter;
+  onDateFrom: (v: string) => void;
+  onDateTo: (v: string) => void;
+  onBeverageType: (v: BeverageFilter) => void;
+  onClear: () => void;
+  activeFilterCount: number;
+}) {
+  return (
+    <div className="rounded-xl border-2 border-border bg-card px-5 py-4 flex flex-wrap items-end gap-4">
+      <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground shrink-0">
+        <Filter className="w-4 h-4" />
+        Filters
+        {activeFilterCount > 0 && (
+          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs font-bold">
+            {activeFilterCount}
+          </span>
+        )}
+      </div>
+
+      {/* Date range */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <label className="text-xs font-medium text-muted-foreground">From</label>
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={e => onDateFrom(e.target.value)}
+          className="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+        <label className="text-xs font-medium text-muted-foreground">To</label>
+        <input
+          type="date"
+          value={dateTo}
+          onChange={e => onDateTo(e.target.value)}
+          className="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+      </div>
+
+      {/* Beverage type */}
+      <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5">
+        {BEVERAGE_TYPES.map(type => (
+          <button
+            key={type}
+            onClick={() => onBeverageType(type)}
+            className={[
+              "px-3 py-1 rounded-md text-xs font-semibold transition-colors",
+              beverageType === type
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted",
+            ].join(" ")}
+          >
+            {type === "ALL" ? "All Types" : type.charAt(0) + type.slice(1).toLowerCase()}
+          </button>
+        ))}
+      </div>
+
+      {/* Clear */}
+      {activeFilterCount > 0 && (
+        <Button variant="ghost" size="sm" onClick={onClear} className="text-muted-foreground h-8">
+          <X className="w-3.5 h-3.5 mr-1" /> Clear
+        </Button>
+      )}
+    </div>
+  );
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 export default function AnalyticsPage() {
-  const { sessions, flatResults, reviewActions, isLoading, hasAnyData, unavailableCount } =
+  const { sessions, flatResults, isLoading, hasAnyData, unavailableCount } =
     useAnalyticsData();
 
-  const m = React.useMemo(
-    () => computeMetrics(flatResults, reviewActions),
-    [flatResults, reviewActions],
+  // ── Filter state ─────────────────────────────────────────────────────────────
+  const [dateFrom, setDateFrom]       = React.useState("");
+  const [dateTo, setDateTo]           = React.useState("");
+  const [beverageType, setBeverageType] = React.useState<BeverageFilter>("ALL");
+
+  const activeFilterCount = React.useMemo(() => {
+    let n = 0;
+    if (dateFrom) n++;
+    if (dateTo) n++;
+    if (beverageType !== "ALL") n++;
+    return n;
+  }, [dateFrom, dateTo, beverageType]);
+
+  const filteredResults = React.useMemo<FlatResult[]>(() => {
+    return flatResults.filter(r => {
+      if (beverageType !== "ALL" && r.beverageType !== beverageType) return false;
+      if (dateFrom) {
+        const sessionDate = r.sessionCreatedAt.slice(0, 10);
+        if (sessionDate < dateFrom) return false;
+      }
+      if (dateTo) {
+        const sessionDate = r.sessionCreatedAt.slice(0, 10);
+        if (sessionDate > dateTo) return false;
+      }
+      return true;
+    });
+  }, [flatResults, dateFrom, dateTo, beverageType]);
+
+  // Scope review actions to the filtered label set so the "Review Decisions"
+  // chart and pendingCount are consistent with the active filters.
+  const reviewActions = React.useMemo(
+    () => getSessionReviewActions(filteredResults.map(r => r.labelId)),
+    [filteredResults],
   );
+
+  const m = React.useMemo(
+    () => computeMetrics(filteredResults, reviewActions),
+    [filteredResults, reviewActions],
+  );
+
+  function handleClearFilters() {
+    setDateFrom("");
+    setDateTo("");
+    setBeverageType("ALL");
+  }
+
+  function handleExportCSV() {
+    const dateStr = new Date().toISOString().slice(0, 10);
+    exportAnalyticsCSV(
+      m.fieldFailData,
+      { dateFrom, dateTo, beverageType },
+      m.total,
+      `analytics-${dateStr}.csv`,
+    );
+  }
 
   return (
     <div className="flex-1 flex flex-col">
@@ -298,6 +419,11 @@ export default function AnalyticsPage() {
             <h2 className="text-2xl font-bold text-foreground">Analytics</h2>
             <p className="text-sm text-muted-foreground mt-0.5">
               Compliance trends across {sessions.length} session{sessions.length !== 1 ? "s" : ""}
+              {activeFilterCount > 0 && (
+                <span className="ml-2 font-medium text-primary">
+                  · showing {m.total} of {flatResults.length} label{flatResults.length !== 1 ? "s" : ""}
+                </span>
+              )}
               {unavailableCount > 0 && (
                 <span className="ml-2 text-review font-medium">
                   · {unavailableCount} session{unavailableCount !== 1 ? "s" : ""} unavailable
@@ -306,9 +432,16 @@ export default function AnalyticsPage() {
               )}
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
-            <RefreshCw className="w-4 h-4 mr-1.5" /> Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            {hasAnyData && m.fieldFailData.length > 0 && (
+              <Button variant="outline" size="sm" onClick={handleExportCSV}>
+                <Download className="w-4 h-4 mr-1.5" /> Export Analytics CSV
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+              <RefreshCw className="w-4 h-4 mr-1.5" /> Refresh
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -339,248 +472,277 @@ export default function AnalyticsPage() {
           </div>
         )}
 
+        {/* ── Filter bar (shown once data loads) ────────────────────────── */}
+        {hasAnyData && (
+          <FilterBar
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            beverageType={beverageType}
+            onDateFrom={setDateFrom}
+            onDateTo={setDateTo}
+            onBeverageType={setBeverageType}
+            onClear={handleClearFilters}
+            activeFilterCount={activeFilterCount}
+          />
+        )}
+
         {/* ── Analytics content ─────────────────────────────────────────── */}
         {hasAnyData && (
           <>
-            {/* Stat cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatCard
-                label="Total Labels Reviewed"
-                value={m.total}
-                icon={<BarChart2 className="w-6 h-6" />}
-                color={C.blue}
-              />
-              <StatCard
-                label="Overall Pass Rate"
-                value={`${m.passRate}%`}
-                sub={`${m.passCount} passed of ${m.total}`}
-                icon={<CheckCircle2 className="w-6 h-6" />}
-                color={C.pass}
-              />
-              <StatCard
-                label="Top Failed Field"
-                value={m.fieldFailData[0] ? `${m.fieldFailData[0].rate}%` : "—"}
-                sub={m.topFailedField}
-                icon={<AlertTriangle className="w-6 h-6" />}
-                color={C.fail}
-              />
-              <StatCard
-                label="Most Common Type"
-                value={m.mostCommonTypeLabel}
-                icon={<TrendingUp className="w-6 h-6" />}
-                color={C.purple}
-              />
-            </div>
+            {/* No results after filtering */}
+            {m.total === 0 && (
+              <div className="rounded-xl border-2 border-border bg-card p-10 text-center text-muted-foreground">
+                <p className="font-semibold text-base mb-1">No labels match these filters</p>
+                <p className="text-sm">Try widening the date range or changing the beverage type.</p>
+                <Button variant="outline" size="sm" className="mt-4" onClick={handleClearFilters}>
+                  <X className="w-3.5 h-3.5 mr-1.5" /> Clear Filters
+                </Button>
+              </div>
+            )}
 
-            {/* Status distribution + Review decisions */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-              <ChartCard title="Status Distribution">
-                <ResponsiveContainer width="100%" height={200}>
-                  <PieChart>
-                    <Pie
-                      data={m.statusPieData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={52}
-                      outerRadius={85}
-                      paddingAngle={3}
-                      dataKey="value"
-                    >
-                      {m.statusPieData.map((entry, i) => (
-                        <Cell key={i} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      content={({ active, payload }) => {
-                        if (!active || !payload?.length) return null;
-                        const d = payload[0].payload as typeof m.statusPieData[0];
-                        return (
-                          <div className="bg-card border border-border rounded-lg shadow-lg px-3 py-2 text-sm">
-                            <p className="font-semibold text-foreground">{d.name}</p>
-                            <p className="text-muted-foreground">{d.value} label{d.value !== 1 ? "s" : ""} ({d.pct}%)</p>
-                          </div>
-                        );
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-
-                {/* Legend with counts + percentages */}
-                <div className="flex justify-center gap-5 mt-2 flex-wrap">
-                  {[
-                    { label: "Pass",         count: m.passCount,   pct: m.total ? Math.round(m.passCount   / m.total * 100) : 0, color: C.pass   },
-                    { label: "Fail",         count: m.failCount,   pct: m.total ? Math.round(m.failCount   / m.total * 100) : 0, color: C.fail   },
-                    { label: "Needs Review", count: m.reviewCount, pct: m.total ? Math.round(m.reviewCount / m.total * 100) : 0, color: C.review },
-                  ].map(({ label, count, pct, color }) => (
-                    <div key={label} className="flex items-center gap-1.5">
-                      <div className="w-3 h-3 rounded-full shrink-0" style={{ background: color }} />
-                      <span className="text-xs font-semibold text-muted-foreground">
-                        {label}:{" "}
-                        <strong className="text-foreground">{count}</strong>
-                        <span className="text-muted-foreground/70 ml-1">({pct}%)</span>
-                      </span>
-                    </div>
-                  ))}
+            {m.total > 0 && (
+              <>
+                {/* Stat cards */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <StatCard
+                    label="Total Labels Reviewed"
+                    value={m.total}
+                    icon={<BarChart2 className="w-6 h-6" />}
+                    color={C.blue}
+                  />
+                  <StatCard
+                    label="Overall Pass Rate"
+                    value={`${m.passRate}%`}
+                    sub={`${m.passCount} passed of ${m.total}`}
+                    icon={<CheckCircle2 className="w-6 h-6" />}
+                    color={C.pass}
+                  />
+                  <StatCard
+                    label="Top Failed Field"
+                    value={m.fieldFailData[0] ? `${m.fieldFailData[0].rate}%` : "—"}
+                    sub={m.topFailedField}
+                    icon={<AlertTriangle className="w-6 h-6" />}
+                    color={C.fail}
+                  />
+                  <StatCard
+                    label="Most Common Type"
+                    value={m.mostCommonTypeLabel}
+                    icon={<TrendingUp className="w-6 h-6" />}
+                    color={C.purple}
+                  />
                 </div>
-              </ChartCard>
 
-              <ChartCard
-                title="Review Decisions"
-                subtitle="Actions taken by reviewers on processed labels"
-              >
-                {m.actionBarData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart
-                      data={m.actionBarData}
-                      layout="vertical"
-                      margin={{ left: 8, right: 40, top: 4, bottom: 4 }}
+                {/* Status distribution + Review decisions */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                  <ChartCard title="Status Distribution">
+                    <ResponsiveContainer width="100%" height={200}>
+                      <PieChart>
+                        <Pie
+                          data={m.statusPieData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={52}
+                          outerRadius={85}
+                          paddingAngle={3}
+                          dataKey="value"
+                        >
+                          {m.statusPieData.map((entry, i) => (
+                            <Cell key={i} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          content={({ active, payload }) => {
+                            if (!active || !payload?.length) return null;
+                            const d = payload[0].payload as typeof m.statusPieData[0];
+                            return (
+                              <div className="bg-card border border-border rounded-lg shadow-lg px-3 py-2 text-sm">
+                                <p className="font-semibold text-foreground">{d.name}</p>
+                                <p className="text-muted-foreground">{d.value} label{d.value !== 1 ? "s" : ""} ({d.pct}%)</p>
+                              </div>
+                            );
+                          }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+
+                    {/* Legend with counts + percentages */}
+                    <div className="flex justify-center gap-5 mt-2 flex-wrap">
+                      {[
+                        { label: "Pass",         count: m.passCount,   pct: m.total ? Math.round(m.passCount   / m.total * 100) : 0, color: C.pass   },
+                        { label: "Fail",         count: m.failCount,   pct: m.total ? Math.round(m.failCount   / m.total * 100) : 0, color: C.fail   },
+                        { label: "Needs Review", count: m.reviewCount, pct: m.total ? Math.round(m.reviewCount / m.total * 100) : 0, color: C.review },
+                      ].map(({ label, count, pct, color }) => (
+                        <div key={label} className="flex items-center gap-1.5">
+                          <div className="w-3 h-3 rounded-full shrink-0" style={{ background: color }} />
+                          <span className="text-xs font-semibold text-muted-foreground">
+                            {label}:{" "}
+                            <strong className="text-foreground">{count}</strong>
+                            <span className="text-muted-foreground/70 ml-1">({pct}%)</span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </ChartCard>
+
+                  <ChartCard
+                    title="Review Decisions"
+                    subtitle="Actions taken by reviewers on processed labels"
+                  >
+                    {m.actionBarData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={220}>
+                        <BarChart
+                          data={m.actionBarData}
+                          layout="vertical"
+                          margin={{ left: 8, right: 40, top: 4, bottom: 4 }}
+                        >
+                          <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+                          <YAxis dataKey="name" type="category" tick={{ fontSize: 11 }} width={145} />
+                          <Tooltip content={<ChartTip />} />
+                          <Bar dataKey="value" name="Labels" radius={[0, 4, 4, 0]}>
+                            {m.actionBarData.map((entry, i) => (
+                              <Cell key={i} fill={entry.fill} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="flex items-center justify-center h-[220px] text-sm text-muted-foreground italic">
+                        No review decisions recorded yet
+                      </div>
+                    )}
+                  </ChartCard>
+                </div>
+
+                {/* By beverage type */}
+                {m.byTypeData.length > 0 && (
+                  <ChartCard
+                    title="Results by Beverage Type"
+                    subtitle="PASS / FAIL / NEEDS REVIEW breakdown per beverage category"
+                  >
+                    <ResponsiveContainer width="100%" height={240}>
+                      <BarChart
+                        data={m.byTypeData}
+                        margin={{ top: 4, right: 16, left: 0, bottom: 4 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                        <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                        <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                        <Tooltip content={<ChartTip />} />
+                        <Legend iconType="circle" iconSize={8} />
+                        <Bar dataKey="Pass"   stackId="a" fill={C.pass}   radius={[0, 0, 0, 0]} />
+                        <Bar dataKey="Review" stackId="a" fill={C.review} radius={[0, 0, 0, 0]} />
+                        <Bar dataKey="Fail"   stackId="a" fill={C.fail}   radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </ChartCard>
+                )}
+
+                {/* Field failure ranking */}
+                {m.fieldFailData.length > 0 && (
+                  <ChartCard
+                    title="Compliance Field Failure Rate"
+                    subtitle="% of labels where each field was FAIL or NEEDS REVIEW — top 3 highlighted in red"
+                  >
+                    <ResponsiveContainer
+                      width="100%"
+                      height={Math.max(220, m.fieldFailData.length * 36)}
                     >
-                      <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
-                      <YAxis dataKey="name" type="category" tick={{ fontSize: 11 }} width={145} />
-                      <Tooltip content={<ChartTip />} />
-                      <Bar dataKey="value" name="Labels" radius={[0, 4, 4, 0]}>
-                        {m.actionBarData.map((entry, i) => (
-                          <Cell key={i} fill={entry.fill} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="flex items-center justify-center h-[220px] text-sm text-muted-foreground italic">
-                    No review decisions recorded yet
+                      <BarChart
+                        data={m.fieldFailData}
+                        layout="vertical"
+                        margin={{ left: 8, right: 52, top: 4, bottom: 4 }}
+                      >
+                        <XAxis
+                          type="number"
+                          domain={[0, 100]}
+                          tickFormatter={v => `${v}%`}
+                          tick={{ fontSize: 11 }}
+                        />
+                        <YAxis
+                          dataKey="field"
+                          type="category"
+                          tick={{ fontSize: 11 }}
+                          width={152}
+                        />
+                        <Tooltip
+                          content={({ active, payload, label }) => {
+                            if (!active || !payload?.length) return null;
+                            const d = m.fieldFailData.find(f => f.field === label);
+                            return (
+                              <div className="bg-card border border-border rounded-lg shadow-lg px-3 py-2 text-sm">
+                                <p className="font-semibold mb-1 text-foreground">{label}</p>
+                                <p className="text-muted-foreground">{payload[0].value}% failure rate</p>
+                                {d && (
+                                  <p className="text-muted-foreground">
+                                    {d.failed} of {d.counted} labels checked
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          }}
+                        />
+                        <Bar dataKey="rate" name="Failure rate %" radius={[0, 4, 4, 0]}>
+                          {m.fieldFailData.map((_, i) => (
+                            <Cell key={i} fill={i < 3 ? C.fail : i < 6 ? C.review : C.muted} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </ChartCard>
+                )}
+
+                {/* Monthly trends — only show when ≥2 distinct months of data */}
+                {m.monthlyData.length >= 2 && (
+                  <ChartCard
+                    title="Trends Over Time"
+                    subtitle="Label volume and pass/fail counts by month (right axis = pass rate %)"
+                  >
+                    <ResponsiveContainer width="100%" height={280}>
+                      <LineChart
+                        data={m.monthlyData}
+                        margin={{ top: 4, right: 32, left: 0, bottom: 4 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                        <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                        <YAxis yAxisId="left"  tick={{ fontSize: 11 }} allowDecimals={false} />
+                        <YAxis
+                          yAxisId="right"
+                          orientation="right"
+                          tickFormatter={v => `${v}%`}
+                          tick={{ fontSize: 11 }}
+                          domain={[0, 100]}
+                        />
+                        <Tooltip content={<ChartTip />} />
+                        <Legend iconType="circle" iconSize={8} />
+                        <Line
+                          yAxisId="left"  type="monotone" dataKey="Pass"
+                          stroke={C.pass}   strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }}
+                        />
+                        <Line
+                          yAxisId="left"  type="monotone" dataKey="Fail"
+                          stroke={C.fail}   strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }}
+                        />
+                        <Line
+                          yAxisId="left"  type="monotone" dataKey="Review"
+                          stroke={C.review} strokeWidth={2} strokeDasharray="5 3" dot={{ r: 3 }}
+                        />
+                        <Line
+                          yAxisId="right" type="monotone" dataKey="Pass %"
+                          stroke={C.blue}   strokeWidth={2} strokeDasharray="8 4" dot={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </ChartCard>
+                )}
+
+                {/* Single-month notice */}
+                {m.monthlyData.length === 1 && (
+                  <div className="rounded-xl border-2 border-border bg-card p-5 text-sm text-muted-foreground text-center">
+                    All labels were checked in the same month — trends will appear once you have data across multiple months.
                   </div>
                 )}
-              </ChartCard>
-            </div>
-
-            {/* By beverage type */}
-            {m.byTypeData.length > 0 && (
-              <ChartCard
-                title="Results by Beverage Type"
-                subtitle="PASS / FAIL / NEEDS REVIEW breakdown per beverage category"
-              >
-                <ResponsiveContainer width="100%" height={240}>
-                  <BarChart
-                    data={m.byTypeData}
-                    margin={{ top: 4, right: 16, left: 0, bottom: 4 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                    <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                    <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                    <Tooltip content={<ChartTip />} />
-                    <Legend iconType="circle" iconSize={8} />
-                    <Bar dataKey="Pass"   stackId="a" fill={C.pass}   radius={[0, 0, 0, 0]} />
-                    <Bar dataKey="Review" stackId="a" fill={C.review} radius={[0, 0, 0, 0]} />
-                    <Bar dataKey="Fail"   stackId="a" fill={C.fail}   radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </ChartCard>
-            )}
-
-            {/* Field failure ranking */}
-            {m.fieldFailData.length > 0 && (
-              <ChartCard
-                title="Compliance Field Failure Rate"
-                subtitle="% of labels where each field was FAIL or NEEDS REVIEW — top 3 highlighted in red"
-              >
-                <ResponsiveContainer
-                  width="100%"
-                  height={Math.max(220, m.fieldFailData.length * 36)}
-                >
-                  <BarChart
-                    data={m.fieldFailData}
-                    layout="vertical"
-                    margin={{ left: 8, right: 52, top: 4, bottom: 4 }}
-                  >
-                    <XAxis
-                      type="number"
-                      domain={[0, 100]}
-                      tickFormatter={v => `${v}%`}
-                      tick={{ fontSize: 11 }}
-                    />
-                    <YAxis
-                      dataKey="field"
-                      type="category"
-                      tick={{ fontSize: 11 }}
-                      width={152}
-                    />
-                    <Tooltip
-                      content={({ active, payload, label }) => {
-                        if (!active || !payload?.length) return null;
-                        const d = m.fieldFailData.find(f => f.field === label);
-                        return (
-                          <div className="bg-card border border-border rounded-lg shadow-lg px-3 py-2 text-sm">
-                            <p className="font-semibold mb-1 text-foreground">{label}</p>
-                            <p className="text-muted-foreground">{payload[0].value}% failure rate</p>
-                            {d && (
-                              <p className="text-muted-foreground">
-                                {d.failed} of {d.counted} labels checked
-                              </p>
-                            )}
-                          </div>
-                        );
-                      }}
-                    />
-                    <Bar dataKey="rate" name="Failure rate %" radius={[0, 4, 4, 0]}>
-                      {m.fieldFailData.map((_, i) => (
-                        <Cell key={i} fill={i < 3 ? C.fail : i < 6 ? C.review : C.muted} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </ChartCard>
-            )}
-
-            {/* Monthly trends — only show when ≥2 distinct months of data */}
-            {m.monthlyData.length >= 2 && (
-              <ChartCard
-                title="Trends Over Time"
-                subtitle="Label volume and pass/fail counts by month (right axis = pass rate %)"
-              >
-                <ResponsiveContainer width="100%" height={280}>
-                  <LineChart
-                    data={m.monthlyData}
-                    margin={{ top: 4, right: 32, left: 0, bottom: 4 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                    <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-                    <YAxis yAxisId="left"  tick={{ fontSize: 11 }} allowDecimals={false} />
-                    <YAxis
-                      yAxisId="right"
-                      orientation="right"
-                      tickFormatter={v => `${v}%`}
-                      tick={{ fontSize: 11 }}
-                      domain={[0, 100]}
-                    />
-                    <Tooltip content={<ChartTip />} />
-                    <Legend iconType="circle" iconSize={8} />
-                    <Line
-                      yAxisId="left"  type="monotone" dataKey="Pass"
-                      stroke={C.pass}   strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }}
-                    />
-                    <Line
-                      yAxisId="left"  type="monotone" dataKey="Fail"
-                      stroke={C.fail}   strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }}
-                    />
-                    <Line
-                      yAxisId="left"  type="monotone" dataKey="Review"
-                      stroke={C.review} strokeWidth={2} strokeDasharray="5 3" dot={{ r: 3 }}
-                    />
-                    <Line
-                      yAxisId="right" type="monotone" dataKey="Pass %"
-                      stroke={C.blue}   strokeWidth={2} strokeDasharray="8 4" dot={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </ChartCard>
-            )}
-
-            {/* Single-month notice */}
-            {m.monthlyData.length === 1 && (
-              <div className="rounded-xl border-2 border-border bg-card p-5 text-sm text-muted-foreground text-center">
-                All labels were checked in the same month — trends will appear once you have data across multiple months.
-              </div>
+              </>
             )}
           </>
         )}

@@ -60,3 +60,58 @@ export function exportSessionToCSV(results: LabelAnalysisResult[], filename = "s
   link.click();
   document.body.removeChild(link);
 }
+
+export interface AnalyticsFieldEntry {
+  field: string;
+  rate: number;
+  failed: number;
+  counted: number;
+}
+
+export function exportAnalyticsCSV(
+  fieldData: AnalyticsFieldEntry[],
+  filters: { dateFrom: string; dateTo: string; beverageType: string },
+  totalLabels: number,
+  filename = "analytics-export.csv",
+) {
+  const escapeCSV = (val: string | number | null | undefined) => {
+    if (val === null || val === undefined) return '""';
+    const str = String(val).replace(/"/g, '""');
+    return `"${str}"`;
+  };
+
+  const metaRows = [
+    ["Exported", new Date().toISOString()],
+    ["Total Labels", String(totalLabels)],
+    ["Date From", filters.dateFrom || "All time"],
+    ["Date To", filters.dateTo || "All time"],
+    ["Beverage Type", filters.beverageType === "ALL" ? "All types" : filters.beverageType],
+  ];
+
+  const headers = ["Field", "Failure Rate (%)", "Failed", "Total Checked"];
+
+  const dataRows = fieldData.map(e => [
+    e.field,
+    e.rate,
+    e.failed,
+    e.counted,
+  ].map(escapeCSV).join(","));
+
+  const csvContent = [
+    ...metaRows.map(r => r.map(escapeCSV).join(",")),
+    "",
+    headers.map(escapeCSV).join(","),
+    ...dataRows,
+  ].join("\n");
+
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", filename);
+  link.style.visibility = "hidden";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
