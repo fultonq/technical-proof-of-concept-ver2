@@ -159,9 +159,12 @@ export default function AllResultsPage() {
 
   const [lightbox, setLightbox] = React.useState<{ src: string; alt: string } | null>(null);
 
+  const isFiltered = statusFilter !== "ALL" || beverageFilter !== "ALL" || searchTerm.trim() !== "";
+
   const handleExportAll = () => {
-    if (!flatResults.length) return;
-    exportSessionToCSV(flatResults, "ttb-all-results.csv");
+    const toExport = isFiltered ? filteredResults : flatResults;
+    if (!toExport.length) return;
+    exportSessionToCSV(toExport, "ttb-all-results.csv");
   };
 
   const unavailableCount = queries.filter(q => q.isError).length;
@@ -200,7 +203,10 @@ export default function AllResultsPage() {
             </div>
             {flatResults.length > 0 && (
               <Button variant="outline" size="sm" onClick={handleExportAll}>
-                <Download className="w-4 h-4 mr-1.5" /> Export All CSV
+                <Download className="w-4 h-4 mr-1.5" />
+                {isFiltered
+                  ? `Export ${filteredResults.length} filtered label${filteredResults.length !== 1 ? "s" : ""}`
+                  : "Export All CSV"}
               </Button>
             )}
           </div>

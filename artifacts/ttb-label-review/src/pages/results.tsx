@@ -266,14 +266,22 @@ export default function ResultsPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              <Button
-                size="lg"
-                variant="outline"
-                className="text-base font-semibold"
-                onClick={() => exportSessionToCSV(sessionData.results, `ttb-report-${sessionId}.csv`)}
-              >
-                <Download className="w-5 h-5 mr-2" /> Download CSV
-              </Button>
+              {(() => {
+                const isFiltered = statusFilter !== "ALL" || beverageFilter !== "ALL" || searchTerm.trim() !== "";
+                const exportLabel = isFiltered
+                  ? `Export ${filteredResults.length} filtered label${filteredResults.length !== 1 ? "s" : ""}`
+                  : "Download CSV";
+                return (
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    className="text-base font-semibold"
+                    onClick={() => exportSessionToCSV(filteredResults, `ttb-report-${sessionId}.csv`)}
+                  >
+                    <Download className="w-5 h-5 mr-2" /> {exportLabel}
+                  </Button>
+                );
+              })()}
               <Button
                 size="lg"
                 className="text-base font-semibold"
