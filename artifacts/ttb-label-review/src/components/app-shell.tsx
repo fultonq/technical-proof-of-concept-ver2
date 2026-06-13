@@ -1,7 +1,7 @@
 import React from "react";
 import { Link, useLocation } from "wouter";
 import {
-  Home, BarChart2, FolderOpen, HelpCircle, Settings, Shield, ChevronRight,
+  Home, BarChart2, FolderOpen, HelpCircle, Settings, Shield, ChevronRight, TrendingUp,
 } from "lucide-react";
 
 interface NavItem {
@@ -12,10 +12,11 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { href: "/",        icon: <Home className="w-4.5 h-4.5" />,     label: "Home",        sublabel: "Add & check labels" },
-  { href: "/all-results", icon: <BarChart2 className="w-4.5 h-4.5" />, label: "All Results", sublabel: "View everything" },
-  { href: "/manage",  icon: <FolderOpen className="w-4.5 h-4.5" />, label: "My Batches",  sublabel: "Saved batches" },
-  { href: "/help",    icon: <HelpCircle className="w-4.5 h-4.5" />, label: "Help",        sublabel: "How to use this" },
+  { href: "/",            icon: <Home className="w-4.5 h-4.5" />,       label: "Home",        sublabel: "Add & check labels"  },
+  { href: "/all-results", icon: <BarChart2 className="w-4.5 h-4.5" />,  label: "All Results", sublabel: "View everything"      },
+  { href: "/analytics",   icon: <TrendingUp className="w-4.5 h-4.5" />, label: "Analytics",   sublabel: "Trends & failure rates" },
+  { href: "/manage",      icon: <FolderOpen className="w-4.5 h-4.5" />, label: "My Batches",  sublabel: "Saved batches"       },
+  { href: "/help",        icon: <HelpCircle className="w-4.5 h-4.5" />, label: "Help",        sublabel: "How to use this"     },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
