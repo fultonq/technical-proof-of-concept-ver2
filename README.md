@@ -23,6 +23,7 @@ Handles all three label types: **Beer/Malt Beverage (27 CFR Part 7)**, **Distill
 | `AI_INTEGRATIONS_ANTHROPIC_BASE_URL` | Yes | Anthropic API base URL (auto-set in Replit; set manually otherwise) |
 | `AI_INTEGRATIONS_ANTHROPIC_API_KEY` | Yes | Anthropic API key (auto-set in Replit; set manually otherwise) |
 | `SESSION_SECRET` | Yes | Any random string used to sign Express sessions |
+| `DATABASE_URL` | Yes | PostgreSQL connection string (auto-set by Replit PostgreSQL integration; set manually for local dev) |
 
 ### Run locally
 
@@ -84,7 +85,7 @@ ttb-label-review/
 │   │       │   ├── compliance-engine.ts← field-by-field compliance checks per beverage type
 │   │       │   ├── label-analyzer.ts   ← orchestrator: vision → compliance → session store
 │   │       │   ├── label-generator.ts  ← generates SVG label images from free-form text
-│   │       │   ├── session-store.ts    ← in-memory Map<sessionId, LabelAnalysisResult[]>
+│   │       │   ├── session-store.ts    ← PostgreSQL-backed session store via Drizzle ORM
 │   │       │   └── logger.ts           ← pino logger singleton
 │   │       └── routes/
 │   │           ├── health.ts           ← GET /api/healthz
@@ -98,9 +99,13 @@ ttb-label-review/
 │           ├── App.tsx             ← QueryClientProvider, WouterRouter, route declarations
 │           ├── pages/
 │           │   ├── upload.tsx      ← four upload modes: single, batch, generate, CSV import
-│           │   ├── results.tsx     ← session dashboard: counts, filter, sort, CSV export
+│           │   ├── results.tsx     ← session dashboard: filter/sort by status & type, CSV export
+│           │   ├── all-results.tsx ← cross-session table; filterable, sortable, date column
+│           │   ├── analytics.tsx   ← compliance trends: status donut, field failure ranking, monthly line
 │           │   ├── label-detail.tsx← per-field breakdown, Gov Warning comparison,
 │           │   │                     SFOV panel, wine-specific fields, "How to Fix" guide
+│           │   ├── manage.tsx      ← session history management
+│           │   ├── help.tsx        ← usage guide
 │           │   └── not-found.tsx
 │           ├── components/ui/
 │           │   ├── status-badge.tsx← PASS=green, FAIL=red, REVIEW=amber, N/A=grey
@@ -117,6 +122,9 @@ ttb-label-review/
     │   └── orval.config.ts         ← codegen config → api-client-react + api-zod
     ├── api-client-react/           ← generated React Query hooks + TypeScript types
     ├── api-zod/                    ← generated Zod validation schemas (server-side)
+    ├── db/                         ← Drizzle ORM schema + database client
+    │   └── src/schema/
+    │       └── label-results.ts    ← label_results table (label_id PK, session_id, result jsonb, analyzed_at)
     └── integrations-anthropic-ai/  ← Anthropic SDK wrapper with batch + retry helpers
 ```
 
@@ -162,7 +170,8 @@ Browser: parse CSV rows
 | API contract | OpenAPI 3.1 → Orval codegen | Contract-first keeps frontend/backend in sync |
 | Routing | Wouter | Lightweight, no React Router overhead |
 | Data fetching | TanStack Query | Caching + background refetch for session queries |
-| Session store | In-memory `Map` | Sufficient for PoC; swap Redis/Postgres for production |
+| Session store | PostgreSQL + Drizzle ORM | Label results persist across server restarts |
+| Charts | Recharts | Compliance trend charts on the Analytics page |
 
 ---
 
@@ -269,8 +278,12 @@ Base path: `/api`
 | Route | Page | Features |
 |---|---|---|
 | `/` | Upload | Four modes: single label (with optional back label), batch queue, generate-from-text, CSV import |
-| `/results/:sessionId` | Session Dashboard | Pass/Fail/Review summary bar, filterable + sortable table, CSV export |
+| `/results/:sessionId` | Session Dashboard | Pass/Fail/Review summary; filter by status & beverage type; sortable columns; CSV export |
 | `/results/:sessionId/:labelId` | Label Detail | Per-field breakdown with extracted vs. expected values; Government Warning side-by-side comparison; SFOV panel layout check; wine-specific fields (appellation, sulfite); expandable "How to Fix This" remediation cards; Approve / Issue Correction actions |
+| `/all-results` | All Results | Cross-session label table; filter by status & beverage type; sort by file, brand, type, or date; CSV export |
+| `/analytics` | Analytics | Compliance trend charts: status distribution donut, results by beverage type stacked bar, field failure rate ranking, monthly trends line chart |
+| `/manage` | My Batches | Session history list; delete sessions |
+| `/help` | Help | In-app usage guide |
 
 ---
 
@@ -302,7 +315,7 @@ A sample file is at `sample_data/applications.csv`.
 
 ## Assumptions & Trade-offs
 
-**In-memory session store** — Sessions live in a Node.js `Map` and are lost on server restart. Acceptable for a PoC; production would use Redis or Postgres with TTL-based expiry.
+**PostgreSQL session store** — Label analysis results are persisted in PostgreSQL via Drizzle ORM (`lib/db`). Results survive server restarts. The development database is provided by Replit's built-in PostgreSQL integration (`DATABASE_URL` is auto-set). A TTL-based expiry policy should be added for production scale.
 
 **Multi-image support (front + back)** — When both label faces are uploaded, both images are sent to Claude in a single API call. This is the recommended path for any product where mandatory fields are split across panels (e.g. Government Warning on the back).
 

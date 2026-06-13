@@ -68,7 +68,7 @@ The system uses a two-stage pipeline designed to keep AI and compliance logic st
 | Claude extracts; engine decides | Keeps compliance rules auditable and legally defensible. AI output is never trusted as a compliance verdict. |
 | Confidence scoring | Fields Claude is uncertain about (below 60% confidence) are escalated to NEEDS REVIEW rather than PASS or FAIL, flagging them for human verification. |
 | Multi-image support | Front and back label panels are submitted together in a single AI call, allowing fields like the Government Warning (typically on the back) and the brand name (typically on the front) to be evaluated together. |
-| In-memory session store | For this PoC, results are stored in server memory during the review session. No database is used, keeping the system lightweight and easy to deploy. |
+| PostgreSQL session store | Label results are stored in PostgreSQL via Drizzle ORM and persist across server restarts. Reviewers can return to previous sessions from any browser without re-uploading. |
 
 ### Compliance Checks Performed
 
@@ -268,7 +268,7 @@ Click on any label in the results table to open its detail page. This page shows
 - **Use clear, high-resolution images.** Blurry or low-contrast images will reduce the AI's confidence and may generate more NEEDS REVIEW flags.
 - **Submit front and back panels together** when the Government Warning is on the back label.
 - **Fill in the Expected Brand Name** when you know the registered COLA name — this enables an exact brand name verification.
-- **Session results are temporary.** Export your results to CSV before closing the browser or refreshing the page, as data is not saved permanently in this PoC version.
+- **Session results are saved.** Label analysis results are stored in a PostgreSQL database and persist across server restarts. Return to previous sessions via the **All Results** or **My Batches** pages at any time.
 
 ---
 
@@ -291,8 +291,10 @@ The application is built on the following technologies:
 | UI Component Library | shadcn/ui | — |
 | Data Fetching (frontend) | TanStack Query | 5 |
 | Client-side Routing | Wouter | 3 |
+| Database | PostgreSQL + Drizzle ORM | — |
 | File Upload Handling | Multer | — |
 | Server Logging | Pino | — |
+| Charts | Recharts | 2 |
 | API Contract | OpenAPI 3.1 → Orval codegen | — |
 
 ### Why This Stack Was Chosen
@@ -356,7 +358,7 @@ workspace/                          ← Monorepo root
 │   │           ├── label-analyzer.ts     ← Orchestrates Vision → Engine pipeline
 │   │           ├── label-generator.ts    ← Generates SVG label images from plain text
 │   │           ├── label-types.ts        ← Shared TypeScript interfaces
-│   │           ├── session-store.ts      ← In-memory Map<sessionId, results[]>
+│   │           ├── session-store.ts      ← PostgreSQL-backed session store via Drizzle ORM
 │   │           └── logger.ts             ← Pino logger singleton
 │   │
 │   └── ttb-label-review/           ← React frontend (served as static files in production)
@@ -366,9 +368,12 @@ workspace/                          ← Monorepo root
 │           ├── main.tsx            ← React root; TanStack Query provider
 │           ├── pages/
 │           │   ├── upload.tsx      ← Main upload page; all four submission modes
-│           │   ├── results.tsx     ← Session results dashboard; filter + CSV export
+│           │   ├── results.tsx     ← Session dashboard; filter by status & type; sortable columns; CSV export
+│           │   ├── all-results.tsx ← Cross-session table; filter, sort by file/brand/type/date; CSV export
+│           │   ├── analytics.tsx   ← Compliance trends: status donut, field failure ranking, monthly line chart
 │           │   ├── label-detail.tsx← Per-label field breakdown + remediation cards
 │           │   ├── manage.tsx      ← Session history management page
+│           │   ├── help.tsx        ← In-app usage guide
 │           │   └── not-found.tsx   ← 404 fallback
 │           └── lib/
 │               ├── corrections.ts  ← Per-field "How to Fix This" remediation text
@@ -386,6 +391,10 @@ workspace/                          ← Monorepo root
 │   │   └── src/generated/          ← DO NOT EDIT — auto-generated React Query hooks
 │   ├── api-zod/
 │   │   └── src/generated/          ← DO NOT EDIT — auto-generated Zod validators
+│   ├── db/
+│   │   ├── drizzle.config.ts       ← Drizzle Kit config (points at DATABASE_URL)
+│   │   └── src/schema/
+│   │       └── label-results.ts    ← label_results table: label_id PK, session_id, result (jsonb), analyzed_at
 │   └── integrations-anthropic-ai/
 │       └── src/
 │           ├── client.ts           ← Anthropic client (supports both Replit + standard API keys)
