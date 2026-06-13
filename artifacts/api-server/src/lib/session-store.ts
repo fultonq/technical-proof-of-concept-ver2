@@ -3,22 +3,29 @@ import { eq } from "drizzle-orm";
 import { logger } from "./logger.js";
 import type { LabelAnalysisResult } from "./label-types.js";
 
-// PostgreSQL-backed session store using Drizzle ORM.
+// Dual-mode session store:
+//   • PostgreSQL via Drizzle ORM when DATABASE_URL is set
+//   • In-memory Map fallback when DATABASE_URL is absent (e.g. Render without a DB add-on)
 //
-// Each label result is a row in the `label_results` table with columns:
-//   label_id  — UUID primary key
-//   session_id — groups results that belong to the same review batch
-//   result    — JSONB blob of the full LabelAnalysisResult
-//   analyzed_at — timestamp (used for ordering within a session)
-//
-// All four public functions are async to match the DB driver. Callers in
-// routes/labels.ts have been updated to await them.
+// All public functions are async so callers are identical in both modes.
+
+const memStore = new Map<string, LabelAnalysisResult[]>();
+
+function useMemory(): boolean {
+  return db === null;
+}
 
 export async function addToSession(
   sessionId: string,
   result: LabelAnalysisResult,
 ): Promise<void> {
-  await db.insert(labelResults).values({
+  if (useMemory()) {
+    const existing = memStore.get(sessionId) ?? [];
+    existing.push(result);
+    memStore.set(sessionId, existing);
+    return;
+  }
+  await db!.insert(labelResults).values({
     labelId: result.labelId,
     sessionId,
     result,
@@ -28,7 +35,10 @@ export async function addToSession(
 export async function getSession(
   sessionId: string,
 ): Promise<LabelAnalysisResult[] | undefined> {
-  const rows = await db
+  if (useMemory()) {
+    return memStore.get(sessionId);
+  }
+  const rows = await db!
     .select()
     .from(labelResults)
     .where(eq(labelResults.sessionId, sessionId))
@@ -41,7 +51,14 @@ export async function getSession(
 export async function getLabelById(
   labelId: string,
 ): Promise<LabelAnalysisResult | undefined> {
-  const rows = await db
+  if (useMemory()) {
+    for (const results of memStore.values()) {
+      const found = results.find((r) => r.labelId === labelId);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  const rows = await db!
     .select()
     .from(labelResults)
     .where(eq(labelResults.labelId, labelId))
@@ -52,7 +69,10 @@ export async function getLabelById(
 }
 
 export async function deleteSession(sessionId: string): Promise<boolean> {
-  const deleted = await db
+  if (useMemory()) {
+    return memStore.delete(sessionId);
+  }
+  const deleted = await db!
     .delete(labelResults)
     .where(eq(labelResults.sessionId, sessionId))
     .returning({ labelId: labelResults.labelId });
@@ -60,13 +80,32 @@ export async function deleteSession(sessionId: string): Promise<boolean> {
   return deleted.length > 0;
 }
 
-// Warm-up: verify DB connectivity on startup.
+// Warm-up: verify connectivity (or log that we're running in-memory mode).
 export async function initSessionStore(): Promise<void> {
+  if (useMemory()) {
+    logger.warn(
+      "DATABASE_URL is not set — session store running in-memory. " +
+      "Results will be lost on server restart. Set DATABASE_URL to enable persistence.",
+    );
+    return;
+  }
   try {
-    await db.select({ labelId: labelResults.labelId }).from(labelResults).limit(1);
+    await db!.select({ labelId: labelResults.labelId }).from(labelResults).limit(1);
     logger.info("Session store: PostgreSQL backend ready");
   } catch (err) {
     logger.error({ err }, "Session store: DB connectivity check failed");
     throw err;
   }
+}
+
+// Returns all stored results across all sessions (used by /all-results endpoint).
+export async function getAllResults(): Promise<LabelAnalysisResult[]> {
+  if (useMemory()) {
+    return Array.from(memStore.values()).flat();
+  }
+  const rows = await db!
+    .select()
+    .from(labelResults)
+    .orderBy(labelResults.analyzedAt);
+  return rows.map((r) => r.result as LabelAnalysisResult);
 }
