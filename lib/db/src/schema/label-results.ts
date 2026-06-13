@@ -10,7 +10,10 @@ export const labelResults = pgTable(
       .defaultNow()
       .notNull(),
   },
-  (t) => [index("label_results_session_id_idx").on(t.sessionId)],
+  (t) => [
+    index("label_results_session_id_idx").on(t.sessionId),
+    index("label_results_analyzed_at_idx").on(t.analyzedAt),
+  ],
 );
 
 export type LabelResultRow = typeof labelResults.$inferSelect;

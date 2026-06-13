@@ -1,7 +1,24 @@
 import { db, labelResults } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, lt } from "drizzle-orm";
 import { logger } from "./logger.js";
 import type { LabelAnalysisResult } from "./label-types.js";
+
+// How many days of label results to retain. Override via LABEL_RESULT_MAX_AGE_DAYS env var.
+const DEFAULT_MAX_AGE_DAYS = 30;
+
+export function getMaxAgeDays(): number {
+  const raw = process.env["LABEL_RESULT_MAX_AGE_DAYS"];
+  if (!raw) return DEFAULT_MAX_AGE_DAYS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    logger.warn(
+      { raw },
+      "LABEL_RESULT_MAX_AGE_DAYS is invalid — using default of 30 days",
+    );
+    return DEFAULT_MAX_AGE_DAYS;
+  }
+  return parsed;
+}
 
 // Dual-mode session store:
 //   • PostgreSQL via Drizzle ORM when DATABASE_URL is set
@@ -108,4 +125,27 @@ export async function getAllResults(): Promise<LabelAnalysisResult[]> {
     .from(labelResults)
     .orderBy(labelResults.analyzedAt);
   return rows.map((r) => r.result as LabelAnalysisResult);
+}
+
+// Delete rows whose analyzed_at is older than LABEL_RESULT_MAX_AGE_DAYS (default 30).
+// Returns the number of rows deleted. No-op in in-memory mode (TTL is irrelevant there).
+export async function cleanupOldResults(): Promise<number> {
+  if (useMemory()) return 0;
+
+  const maxAgeDays = getMaxAgeDays();
+  const cutoff = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000);
+
+  const deleted = await db!
+    .delete(labelResults)
+    .where(lt(labelResults.analyzedAt, cutoff))
+    .returning({ labelId: labelResults.labelId });
+
+  if (deleted.length > 0) {
+    logger.info(
+      { deleted: deleted.length, cutoff, maxAgeDays },
+      "Session store: pruned old label results",
+    );
+  }
+
+  return deleted.length;
 }

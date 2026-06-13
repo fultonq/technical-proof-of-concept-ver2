@@ -12,6 +12,7 @@ AI-powered compliance tool that checks alcohol beverage labels against TTB manda
 - Required env: `SESSION_SECRET` — Express session secret (set in Replit secrets)
 - Required env: `AI_INTEGRATIONS_ANTHROPIC_BASE_URL` + `AI_INTEGRATIONS_ANTHROPIC_API_KEY` — auto-set by Replit Anthropic integration
 - Required env: `DATABASE_URL` (+ `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`) — auto-set by Replit PostgreSQL integration
+- Optional env: `LABEL_RESULT_MAX_AGE_DAYS` — how many days of label results to retain (default: `30`); rows older than this are deleted automatically
 
 ## Stack
 
@@ -44,6 +45,7 @@ AI-powered compliance tool that checks alcohol beverage labels against TTB manda
 - **Sulfite absent = NEEDS_REVIEW, not FAIL** — Lab must confirm < 10 ppm before a "no sulfites" claim is valid. The engine cannot determine this from an image alone.
 - **CSV import is client-orchestrated** — Each CSV row: format label text → `POST /generate-preview` (SVG) → canvas SVG→PNG → `POST /upload`. Session ID is shared across all rows so results appear in one session.
 - **OpenAPI-first codegen** — Never edit `lib/api-client-react/src/generated/` or `lib/api-zod/src/generated/` by hand. Always update `openapi.yaml` first, then run codegen.
+- **Automatic result TTL** — On startup the API server runs `cleanupOldResults()` immediately, then every hour. Rows in `label_results` older than `LABEL_RESULT_MAX_AGE_DAYS` (default 30) are deleted. The `analyzed_at` column is indexed to make this efficient.
 
 ## Product
 
