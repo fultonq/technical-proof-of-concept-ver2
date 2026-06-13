@@ -13,7 +13,7 @@ import {
 } from "@/lib/review-actions";
 import {
   Download, Search, Loader2, CheckCircle2, XCircle, Clock,
-  FolderOpen, ImageOff, Minus,
+  FolderOpen, ImageOff, Minus, ArrowUp, ArrowDown, ArrowUpDown,
 } from "lucide-react";
 import { getThumbnail, getFullImage } from "@/lib/label-thumbnails";
 import { getSessions, type SessionRecord } from "@/lib/session-history";
@@ -67,18 +67,49 @@ export default function AllResultsPage() {
   const reviewCount = flatResults.filter(r => r.overallStatus === "REVIEW").length;
   const otherCount  = flatResults.length - passCount - failCount - reviewCount;
 
-  const [searchTerm, setSearchTerm]   = React.useState("");
-  const [statusFilter, setStatusFilter] = React.useState<string>("ALL");
+  const [searchTerm, setSearchTerm]     = React.useState("");
+  const [statusFilter, setStatusFilter]   = React.useState<string>("ALL");
+  const [beverageFilter, setBeverageFilter] = React.useState<string>("ALL");
+  type SortKey = "fileName" | "brand" | "type" | "status" | "date";
+  const [sortKey, setSortKey] = React.useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = React.useState<"asc" | "desc">("asc");
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("asc"); }
+  };
+
+  function SortIcon({ col }: { col: SortKey }) {
+    if (sortKey !== col) return <ArrowUpDown className="w-3 h-3 inline ml-1 opacity-40" />;
+    return sortDir === "asc"
+      ? <ArrowUp className="w-3 h-3 inline ml-1" />
+      : <ArrowDown className="w-3 h-3 inline ml-1" />;
+  }
 
   const filteredResults = React.useMemo(() => {
-    return flatResults.filter(r => {
+    let results = flatResults.filter(r => {
       const matchesSearch =
         r.fileName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (r.brandName.extractedValue ?? "").toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesStatus = statusFilter === "ALL" || r.overallStatus === statusFilter;
-      return matchesSearch && matchesStatus;
+      const matchesStatus   = statusFilter   === "ALL" || r.overallStatus === statusFilter;
+      const matchesBeverage = beverageFilter === "ALL" || r.beverageType  === beverageFilter;
+      return matchesSearch && matchesStatus && matchesBeverage;
     });
-  }, [flatResults, searchTerm, statusFilter]);
+    if (sortKey) {
+      results = [...results].sort((a, b) => {
+        let av: string | number = "", bv: string | number = "";
+        if (sortKey === "fileName") { av = a.fileName.toLowerCase(); bv = b.fileName.toLowerCase(); }
+        if (sortKey === "brand")    { av = (a.brandName.extractedValue ?? "").toLowerCase(); bv = (b.brandName.extractedValue ?? "").toLowerCase(); }
+        if (sortKey === "type")     { av = (a.beverageType ?? "").toLowerCase(); bv = (b.beverageType ?? "").toLowerCase(); }
+        if (sortKey === "status")   { av = a.overallStatus; bv = b.overallStatus; }
+        if (sortKey === "date")     { av = (a as any).analyzedAt ?? ""; bv = (b as any).analyzedAt ?? ""; }
+        if (av < bv) return sortDir === "asc" ? -1 : 1;
+        if (av > bv) return sortDir === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return results;
+  }, [flatResults, searchTerm, statusFilter, beverageFilter, sortKey, sortDir]);
 
   const [thumbnails, setThumbnails] = React.useState<Record<string, string>>({});
   const [fullImages, setFullImages]  = React.useState<Record<string, string>>({});
@@ -195,15 +226,10 @@ export default function AllResultsPage() {
             </div>
 
             {/* Search + filter bar */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-muted-foreground">
-                  {filteredResults.length} of {flatResults.length} label{flatResults.length !== 1 ? "s" : ""}
-                </span>
-                {statusFilter !== "ALL" && (
-                  <button onClick={() => setStatusFilter("ALL")} className="text-xs text-primary font-semibold hover:underline">Clear filter</button>
-                )}
-              </div>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+              <span className="text-sm font-semibold text-muted-foreground">
+                {filteredResults.length} of {flatResults.length} label{flatResults.length !== 1 ? "s" : ""}
+              </span>
               <div className="relative w-full sm:w-72">
                 <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -215,23 +241,87 @@ export default function AllResultsPage() {
               </div>
             </div>
 
+            {/* Filter pills */}
+            <div className="flex flex-wrap items-center gap-2 mb-4">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {(["ALL", "PASS", "FAIL", "REVIEW"] as const).map(s => (
+                  <button
+                    key={s}
+                    onClick={() => setStatusFilter(statusFilter === s ? "ALL" : s)}
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border transition-colors ${
+                      statusFilter === s
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background text-muted-foreground border-border hover:border-primary/50 hover:text-foreground"
+                    }`}
+                  >
+                    {s === "ALL" ? "All" : s === "PASS" ? "Pass" : s === "FAIL" ? "Fail" : "Needs Review"}
+                  </button>
+                ))}
+              </div>
+              <span className="w-px self-stretch bg-border hidden sm:block" />
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {(["ALL", "SPIRITS", "WINE", "MALT"] as const).map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setBeverageFilter(beverageFilter === t ? "ALL" : t)}
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border transition-colors ${
+                      beverageFilter === t
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background text-muted-foreground border-border hover:border-primary/50 hover:text-foreground"
+                    }`}
+                  >
+                    {t === "ALL" ? "All Types" : t === "SPIRITS" ? "Spirits" : t === "WINE" ? "Wine" : "Malt"}
+                  </button>
+                ))}
+              </div>
+              {(statusFilter !== "ALL" || beverageFilter !== "ALL") && (
+                <button
+                  onClick={() => { setStatusFilter("ALL"); setBeverageFilter("ALL"); }}
+                  className="ml-auto text-xs text-primary font-semibold hover:underline"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+
             {/* Table */}
             <div className="border-2 border-border rounded-xl overflow-hidden shadow-sm bg-card">
               <table className="w-full text-left">
                 <thead className="bg-muted border-b border-border">
                   <tr>
                     <th className="px-3 py-3 text-xs font-bold uppercase tracking-wider text-muted-foreground w-12">Img</th>
-                    <th className="px-3 py-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">Label / Brand</th>
+                    <th
+                      className="px-3 py-3 text-xs font-bold uppercase tracking-wider text-muted-foreground cursor-pointer hover:text-foreground select-none"
+                      onClick={() => handleSort("fileName")}
+                    >
+                      Label / Brand <SortIcon col="fileName" />
+                    </th>
                     <th className="px-3 py-3 text-xs font-bold uppercase tracking-wider text-muted-foreground hidden md:table-cell">Session</th>
-                    <th className="px-3 py-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">Type</th>
-                    <th className="px-3 py-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">Result</th>
+                    <th
+                      className="px-3 py-3 text-xs font-bold uppercase tracking-wider text-muted-foreground cursor-pointer hover:text-foreground select-none"
+                      onClick={() => handleSort("type")}
+                    >
+                      Type <SortIcon col="type" />
+                    </th>
+                    <th
+                      className="px-3 py-3 text-xs font-bold uppercase tracking-wider text-muted-foreground cursor-pointer hover:text-foreground select-none"
+                      onClick={() => handleSort("status")}
+                    >
+                      Result <SortIcon col="status" />
+                    </th>
+                    <th
+                      className="px-3 py-3 text-xs font-bold uppercase tracking-wider text-muted-foreground cursor-pointer hover:text-foreground select-none"
+                      onClick={() => handleSort("date")}
+                    >
+                      Date <SortIcon col="date" />
+                    </th>
                     <th className="px-3 py-3 text-xs font-bold uppercase tracking-wider text-muted-foreground text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {filteredResults.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-14 text-center text-muted-foreground">
+                      <td colSpan={7} className="px-4 py-14 text-center text-muted-foreground">
                         No labels match your search or filter.
                       </td>
                     </tr>
@@ -284,6 +374,13 @@ export default function AllResultsPage() {
                               {(DECISION_LABELS as Record<string, string>)[action.decision]}
                             </p>
                           )}
+                        </td>
+                        <td className="px-3 py-2.5 text-right">
+                          <span className="text-xs text-muted-foreground whitespace-nowrap">
+                            {(result as any).analyzedAt
+                              ? new Date((result as any).analyzedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+                              : "—"}
+                          </span>
                         </td>
                         <td className="px-3 py-2.5 text-right">
                           <Link href={`/results/${result.sessionId}/${result.labelId}`}>

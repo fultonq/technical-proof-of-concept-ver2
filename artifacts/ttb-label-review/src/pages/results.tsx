@@ -12,7 +12,7 @@ import {
 import {
   ArrowLeft, Download, Plus, Search, Loader2, AlertCircle,
   CheckCircle2, XCircle, Clock, MessageSquare, Printer, ShieldCheck, ShieldX, ShieldAlert,
-  UploadCloud, ImageOff,
+  UploadCloud, ImageOff, ArrowUp, ArrowDown, ArrowUpDown,
 } from "lucide-react";
 import { getThumbnail, getFullImage } from "@/lib/label-thumbnails";
 import { Input } from "@/components/ui/input";
@@ -31,6 +31,23 @@ export default function ResultsPage() {
   });
 
   const [searchTerm, setSearchTerm] = React.useState("");
+  const [statusFilter, setStatusFilter] = React.useState<string>("ALL");
+  const [beverageFilter, setBeverageFilter] = React.useState<string>("ALL");
+  type SortKey = "fileName" | "brand" | "status" | "issues" | "date";
+  const [sortKey, setSortKey] = React.useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = React.useState<"asc" | "desc">("asc");
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("asc"); }
+  };
+
+  function SortIcon({ col }: { col: SortKey }) {
+    if (sortKey !== col) return <ArrowUpDown className="w-3.5 h-3.5 inline ml-1 opacity-40" />;
+    return sortDir === "asc"
+      ? <ArrowUp className="w-3.5 h-3.5 inline ml-1" />
+      : <ArrowDown className="w-3.5 h-3.5 inline ml-1" />;
+  }
 
   // ── Thumbnails — loaded from sessionStorage (saved by upload.tsx) ──────────
   const [thumbnails, setThumbnails] = React.useState<Record<string, string>>({});
@@ -153,11 +170,25 @@ export default function ResultsPage() {
     );
   }
 
-  const filteredResults = sessionData.results.filter(
-    (r) =>
-      r.fileName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.brandName.extractedValue?.toLowerCase().includes(searchTerm.toLowerCase()),
+  let filteredResults = sessionData.results.filter(r =>
+    r.fileName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (r.brandName.extractedValue ?? "").toLowerCase().includes(searchTerm.toLowerCase()),
   );
+  if (statusFilter !== "ALL") filteredResults = filteredResults.filter(r => r.overallStatus === statusFilter);
+  if (beverageFilter !== "ALL") filteredResults = filteredResults.filter(r => r.beverageType === beverageFilter);
+  if (sortKey) {
+    filteredResults = [...filteredResults].sort((a, b) => {
+      let av: string | number = "", bv: string | number = "";
+      if (sortKey === "fileName")  { av = a.fileName.toLowerCase(); bv = b.fileName.toLowerCase(); }
+      if (sortKey === "brand")     { av = (a.brandName.extractedValue ?? "").toLowerCase(); bv = (b.brandName.extractedValue ?? "").toLowerCase(); }
+      if (sortKey === "status")    { av = a.overallStatus; bv = b.overallStatus; }
+      if (sortKey === "issues")    { av = a.flags.length; bv = b.flags.length; }
+      if (sortKey === "date")      { av = (a as any).analyzedAt ?? ""; bv = (b as any).analyzedAt ?? ""; }
+      if (av < bv) return sortDir === "asc" ? -1 : 1;
+      if (av > bv) return sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+  }
 
   return (
     <div className="flex-1 flex flex-col">
@@ -292,7 +323,7 @@ export default function ResultsPage() {
           )}
         </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
           <div>
             <h3 className="text-xl font-bold text-foreground">All Labels</h3>
             <p className="text-sm text-muted-foreground mt-0.5">
@@ -310,15 +341,81 @@ export default function ResultsPage() {
           </div>
         </div>
 
+        {/* ── Filter pills ─────────────────────────────────────────────── */}
+        <div className="flex flex-wrap items-center gap-2 mb-5">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {(["ALL", "PASS", "FAIL", "REVIEW"] as const).map(s => (
+              <button
+                key={s}
+                onClick={() => setStatusFilter(statusFilter === s ? "ALL" : s)}
+                className={`px-3 py-1 rounded-full text-sm font-semibold border transition-colors ${
+                  statusFilter === s
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-background text-muted-foreground border-border hover:border-primary/50 hover:text-foreground"
+                }`}
+              >
+                {s === "ALL" ? "All" : s === "PASS" ? "Pass" : s === "FAIL" ? "Fail" : "Needs Review"}
+              </button>
+            ))}
+          </div>
+          <span className="w-px self-stretch bg-border hidden sm:block" />
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {(["ALL", "SPIRITS", "WINE", "MALT"] as const).map(t => (
+              <button
+                key={t}
+                onClick={() => setBeverageFilter(beverageFilter === t ? "ALL" : t)}
+                className={`px-3 py-1 rounded-full text-sm font-semibold border transition-colors ${
+                  beverageFilter === t
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-background text-muted-foreground border-border hover:border-primary/50 hover:text-foreground"
+                }`}
+              >
+                {t === "ALL" ? "All Types" : t === "SPIRITS" ? "Spirits" : t === "WINE" ? "Wine" : "Malt"}
+              </button>
+            ))}
+          </div>
+          {(statusFilter !== "ALL" || beverageFilter !== "ALL") && (
+            <button
+              onClick={() => { setStatusFilter("ALL"); setBeverageFilter("ALL"); }}
+              className="ml-auto text-xs text-primary font-semibold hover:underline"
+            >
+              Clear filters
+            </button>
+          )}
+          <span className="text-xs text-muted-foreground ml-auto sm:ml-0">
+            {filteredResults.length} of {sessionData.totalCount} label{sessionData.totalCount !== 1 ? "s" : ""}
+          </span>
+        </div>
+
         <div className="border-2 border-border rounded-2xl overflow-hidden shadow-sm bg-card">
           <table className="w-full text-left">
             <thead className="bg-muted border-b border-border">
               <tr>
-                <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">Label File</th>
+                <th
+                  className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground cursor-pointer hover:text-foreground select-none"
+                  onClick={() => handleSort("fileName")}
+                >
+                  Label File <SortIcon col="fileName" />
+                </th>
                 <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">Preview</th>
-                <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">Brand Found</th>
-                <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">AI Result</th>
-                <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">Issues</th>
+                <th
+                  className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground cursor-pointer hover:text-foreground select-none"
+                  onClick={() => handleSort("brand")}
+                >
+                  Brand Found <SortIcon col="brand" />
+                </th>
+                <th
+                  className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground cursor-pointer hover:text-foreground select-none"
+                  onClick={() => handleSort("status")}
+                >
+                  AI Result <SortIcon col="status" />
+                </th>
+                <th
+                  className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground cursor-pointer hover:text-foreground select-none"
+                  onClick={() => handleSort("issues")}
+                >
+                  Issues <SortIcon col="issues" />
+                </th>
                 <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground">Decision</th>
                 <th className="px-5 py-4 text-sm font-bold uppercase tracking-wider text-muted-foreground text-right">Actions</th>
               </tr>
