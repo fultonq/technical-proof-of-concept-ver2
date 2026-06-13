@@ -135,30 +135,45 @@ router.post("/v1/labels/generate-preview", async (req, res) => {
   }
 });
 
-router.get("/v1/labels/session/:sessionId", (req, res) => {
+router.get("/v1/labels/session/:sessionId", async (req, res) => {
   const { sessionId } = req.params;
-  const results = getSession(sessionId);
-  if (!results) {
-    res.status(404).json({ error: "Session not found" });
-    return;
+  try {
+    const results = await getSession(sessionId);
+    if (!results) {
+      res.status(404).json({ error: "Session not found" });
+      return;
+    }
+    res.json(buildBatchSummary(sessionId, results));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: `Failed to retrieve session: ${message}` });
   }
-  res.json(buildBatchSummary(sessionId, results));
 });
 
-router.delete("/v1/labels/session/:sessionId", (req, res) => {
+router.delete("/v1/labels/session/:sessionId", async (req, res) => {
   const { sessionId } = req.params;
-  deleteSession(sessionId);
-  res.status(204).send();
+  try {
+    await deleteSession(sessionId);
+    res.status(204).send();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: `Failed to delete session: ${message}` });
+  }
 });
 
-router.get("/v1/labels/:labelId", (req, res) => {
+router.get("/v1/labels/:labelId", async (req, res) => {
   const { labelId } = req.params;
-  const result = getLabelById(labelId);
-  if (!result) {
-    res.status(404).json({ error: "Label result not found" });
-    return;
+  try {
+    const result = await getLabelById(labelId);
+    if (!result) {
+      res.status(404).json({ error: "Label result not found" });
+      return;
+    }
+    res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: `Failed to retrieve label: ${message}` });
   }
-  res.json(result);
 });
 
 export default router;

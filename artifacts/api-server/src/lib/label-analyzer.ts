@@ -73,7 +73,7 @@ export async function analyzeLabel(
       processingMs: Date.now() - startMs,
       analyzedAt: new Date().toISOString(),
     };
-    addToSession(sessionId, fallbackResult);
+    await addToSession(sessionId, fallbackResult);
     return fallbackResult;
   }
 
@@ -113,7 +113,7 @@ export async function analyzeLabel(
     analyzedAt: new Date().toISOString(),
   };
 
-  addToSession(sessionId, result);
+  await addToSession(sessionId, result);
   return result;
 }
 

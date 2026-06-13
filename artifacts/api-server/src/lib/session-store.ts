@@ -1,43 +1,72 @@
+import { db, labelResults } from "@workspace/db";
+import { eq } from "drizzle-orm";
+import { logger } from "./logger.js";
 import type { LabelAnalysisResult } from "./label-types.js";
 
-// In-memory session store keyed by sessionId → ordered list of label results.
+// PostgreSQL-backed session store using Drizzle ORM.
 //
-// Design choice (PoC): pure in-memory Map — no database, no persistence.
-// All sessions and results are lost on server restart. This is intentional for
-// the proof-of-concept phase; a production deployment would replace this with a
-// database-backed store (e.g. PostgreSQL via Drizzle, or Redis).
+// Each label result is a row in the `label_results` table with columns:
+//   label_id  — UUID primary key
+//   session_id — groups results that belong to the same review batch
+//   result    — JSONB blob of the full LabelAnalysisResult
+//   analyzed_at — timestamp (used for ordering within a session)
 //
-// There is no TTL or eviction policy — sessions accumulate for the lifetime of the
-// process. For a PoC with low traffic this is acceptable; long-running production
-// deployments would need periodic cleanup.
-const sessionStore = new Map<string, LabelAnalysisResult[]>();
+// All four public functions are async to match the DB driver. Callers in
+// routes/labels.ts have been updated to await them.
 
-// Appends a label result to the session's result list, creating the list if needed.
-export function addToSession(sessionId: string, result: LabelAnalysisResult): void {
-  const existing = sessionStore.get(sessionId) ?? [];
-  existing.push(result);
-  sessionStore.set(sessionId, existing);
+export async function addToSession(
+  sessionId: string,
+  result: LabelAnalysisResult,
+): Promise<void> {
+  await db.insert(labelResults).values({
+    labelId: result.labelId,
+    sessionId,
+    result,
+  });
 }
 
-// Returns the ordered list of results for a session, or undefined if the sessionId
-// is unknown (e.g. after a server restart or a typo in the ID).
-export function getSession(sessionId: string): LabelAnalysisResult[] | undefined {
-  return sessionStore.get(sessionId);
+export async function getSession(
+  sessionId: string,
+): Promise<LabelAnalysisResult[] | undefined> {
+  const rows = await db
+    .select()
+    .from(labelResults)
+    .where(eq(labelResults.sessionId, sessionId))
+    .orderBy(labelResults.analyzedAt);
+
+  if (rows.length === 0) return undefined;
+  return rows.map((r) => r.result as LabelAnalysisResult);
 }
 
-// Scans all sessions to find a single label by its labelId.
-// O(n) across all stored results — acceptable for PoC volumes.
-// Edge case: labelIds are UUIDs so collisions are astronomically unlikely, but this
-// returns the first match found if two sessions somehow share a labelId.
-export function getLabelById(labelId: string): LabelAnalysisResult | undefined {
-  for (const results of sessionStore.values()) {
-    const found = results.find((r) => r.labelId === labelId);
-    if (found) return found;
+export async function getLabelById(
+  labelId: string,
+): Promise<LabelAnalysisResult | undefined> {
+  const rows = await db
+    .select()
+    .from(labelResults)
+    .where(eq(labelResults.labelId, labelId))
+    .limit(1);
+
+  if (rows.length === 0) return undefined;
+  return rows[0]!.result as LabelAnalysisResult;
+}
+
+export async function deleteSession(sessionId: string): Promise<boolean> {
+  const deleted = await db
+    .delete(labelResults)
+    .where(eq(labelResults.sessionId, sessionId))
+    .returning({ labelId: labelResults.labelId });
+
+  return deleted.length > 0;
+}
+
+// Warm-up: verify DB connectivity on startup.
+export async function initSessionStore(): Promise<void> {
+  try {
+    await db.select({ labelId: labelResults.labelId }).from(labelResults).limit(1);
+    logger.info("Session store: PostgreSQL backend ready");
+  } catch (err) {
+    logger.error({ err }, "Session store: DB connectivity check failed");
+    throw err;
   }
-  return undefined;
-}
-
-// Removes a session and all its results. Returns true if the session existed.
-export function deleteSession(sessionId: string): boolean {
-  return sessionStore.delete(sessionId);
 }

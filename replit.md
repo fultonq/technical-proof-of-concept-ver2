@@ -11,7 +11,7 @@ AI-powered compliance tool that checks alcohol beverage labels against TTB manda
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - Required env: `SESSION_SECRET` — Express session secret (set in Replit secrets)
 - Required env: `AI_INTEGRATIONS_ANTHROPIC_BASE_URL` + `AI_INTEGRATIONS_ANTHROPIC_API_KEY` — auto-set by Replit Anthropic integration
-- No database — pure in-memory session store (Map); data lost on server restart (intentional for PoC)
+- Required env: `DATABASE_URL` (+ `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`) — auto-set by Replit PostgreSQL integration
 
 ## Stack
 
@@ -21,7 +21,7 @@ AI-powered compliance tool that checks alcohol beverage labels against TTB manda
 - Frontend: React 19 + Vite + Tailwind CSS + shadcn/ui + TanStack Query + Wouter
 - API contract: OpenAPI 3.1 → Orval codegen → React Query hooks + Zod schemas
 - Build: esbuild (ESM bundle)
-- Session store: in-memory `Map<sessionId, LabelAnalysisResult[]>` — no database
+- Session store: PostgreSQL via Drizzle ORM (`@workspace/db`) — results persist across restarts
 
 ## Where things live
 
@@ -72,7 +72,7 @@ _Populate as you build — explicit user instructions worth remembering across s
 - **CONFIDENCE_THRESHOLD = 0.6 globally; SFOV uses 0.75** — defined as constants at the top of `compliance-engine.ts`.
 - **Levenshtein threshold = 3** for brand name fuzzy match (not 2 as the old README stated).
 - **`label-analyzer.ts` signature** — `analyzeLabel(images: LabelImage[], fileName: string, options)`. The `images` array can have 1 or 2 entries.
-- **Session store is reset on API server restart** — no persistence. For testing, keep the server running.
+- **Session store is PostgreSQL-backed** — results survive server restarts. Schema: `label_results` table with `label_id` PK, `session_id` (indexed), `result` JSONB, `analyzed_at`.
 
 ## Pointers
 
