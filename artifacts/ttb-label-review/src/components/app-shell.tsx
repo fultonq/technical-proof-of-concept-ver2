@@ -1,7 +1,7 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import {
-  Home, BarChart2, FolderOpen, HelpCircle, Settings, Shield, ChevronRight, TrendingUp,
+  Home, BarChart2, FolderOpen, HelpCircle, Settings, Shield, ChevronRight, TrendingUp, Sun, Moon,
 } from "lucide-react";
 
 interface NavItem {
@@ -19,8 +19,33 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/help",        icon: <HelpCircle className="w-4.5 h-4.5" />, label: "Help",        sublabel: "How to use this"     },
 ];
 
+function useDarkMode() {
+  const [dark, setDark] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem("theme");
+      if (stored) return stored === "dark";
+    } catch {}
+    return false;
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (dark) {
+      root.classList.add("dark");
+    } else {
+      root.classList.remove("dark");
+    }
+    try {
+      localStorage.setItem("theme", dark ? "dark" : "light");
+    } catch {}
+  }, [dark]);
+
+  return [dark, setDark] as const;
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
+  const [dark, setDark] = useDarkMode();
 
   const isActive = (href: string) => {
     if (href === "/") return location === "/";
@@ -116,8 +141,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Settings footer */}
-        <div className="border-t px-3 py-3" style={{ borderColor: "hsl(var(--sidebar-border))" }}>
-          <Link href="/settings">
+        <div className="border-t px-3 py-3 flex items-center gap-1" style={{ borderColor: "hsl(var(--sidebar-border))" }}>
+          <Link href="/settings" className="flex-1">
             <div
               className="flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-colors"
               style={{ color: "hsl(210 20% 55%)" }}
@@ -128,6 +153,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span className="text-sm font-medium">Settings</span>
             </div>
           </Link>
+          <button
+            onClick={() => setDark(!dark)}
+            className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors"
+            style={{ color: "hsl(210 20% 55%)" }}
+            title={dark ? "Switch to light mode" : "Switch to dark mode"}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "hsl(var(--sidebar-accent))"; (e.currentTarget as HTMLElement).style.color = "white"; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = ""; (e.currentTarget as HTMLElement).style.color = ""; }}
+          >
+            {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </button>
         </div>
       </aside>
 
