@@ -1,7 +1,9 @@
 import React from "react";
 import { Link } from "wouter";
 import { useQueries } from "@tanstack/react-query";
-import type { BatchAnalysisResult, LabelAnalysisResult } from "@workspace/api-client-react";
+import type {
+  BatchAnalysisResult, LabelAnalysisResult, FieldResult, SameFieldOfVisionResult,
+} from "@workspace/api-client-react";
 import { getGetSessionResultsQueryKey } from "@workspace/api-client-react";
 import { getSessions, type SessionRecord } from "@/lib/session-history";
 import { getSessionReviewActions } from "@/lib/review-actions";
@@ -17,30 +19,30 @@ import { Button } from "@/components/ui/button";
 
 // ── Colour tokens (match Tailwind theme) ──────────────────────────────────────
 const C = {
-  pass:    "#16a34a",
-  fail:    "#dc2626",
-  review:  "#d97706",
-  blue:    "#3b82f6",
-  purple:  "#8b5cf6",
-  amber:   "#f59e0b",
-  muted:   "#6b7280",
+  pass:   "#16a34a",
+  fail:   "#dc2626",
+  review: "#d97706",
+  blue:   "#3b82f6",
+  purple: "#8b5cf6",
+  muted:  "#6b7280",
 };
 
-// ── Field label map ────────────────────────────────────────────────────────────
-const FIELD_LABELS: Record<string, string> = {
-  brandName:           "Brand Name",
-  classType:           "Class / Type",
-  alcoholContent:      "Alcohol Content",
-  netContents:         "Net Contents",
-  governmentWarning:   "Gov. Warning",
-  bottlerProducer:     "Bottler / Producer",
-  labelLanguage:       "Label Language",
-  prohibitedSurface:   "Prohibited Surface",
-  countryOfOrigin:     "Country of Origin",
-  sameFieldOfVision:   "Same Field of Vision",
-  appellationOfOrigin: "Appellation",
-  sulfiteDeclaration:  "Sulfite Declaration",
-};
+// ── Typed field accessors ─────────────────────────────────────────────────────
+// Each entry: [display label, accessor that returns FieldResult | null | undefined]
+// sameFieldOfVision is excluded here — it's SameFieldOfVisionResult (different shape)
+const FIELD_ACCESSORS: Array<[string, (r: LabelAnalysisResult) => FieldResult | null | undefined]> = [
+  ["Brand Name",        r => r.brandName],
+  ["Class / Type",      r => r.classType],
+  ["Alcohol Content",   r => r.alcoholContent],
+  ["Net Contents",      r => r.netContents],
+  ["Gov. Warning",      r => r.governmentWarning],
+  ["Bottler / Producer",r => r.bottlerProducer],
+  ["Label Language",    r => r.labelLanguage],
+  ["Prohibited Surface",r => r.prohibitedSurface],
+  ["Country of Origin", r => r.countryOfOrigin],
+  ["Appellation",       r => r.appellationOfOrigin],
+  ["Sulfite Declaration",r => r.sulfiteDeclaration],
+];
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface FlatResult extends LabelAnalysisResult {
@@ -66,9 +68,9 @@ function useAnalyticsData() {
     })),
   });
 
-  const isLoading         = queries.some(q => q.isLoading);
-  const hasAnyData        = queries.some(q => !!q.data);
-  const unavailableCount  = queries.filter(q => q.isError).length;
+  const isLoading        = queries.some(q => q.isLoading);
+  const hasAnyData       = queries.some(q => !!q.data);
+  const unavailableCount = queries.filter(q => q.isError).length;
 
   const flatResults = React.useMemo<FlatResult[]>(() => {
     const out: FlatResult[] = [];
@@ -91,21 +93,23 @@ function useAnalyticsData() {
 }
 
 // ── Aggregation ────────────────────────────────────────────────────────────────
+interface FailureEntry { field: string; rate: number; failed: number; counted: number }
+
 function computeMetrics(
   flatResults: FlatResult[],
   reviewActions: ReturnType<typeof getSessionReviewActions>,
 ) {
-  const total      = flatResults.length;
-  const passCount  = flatResults.filter(r => r.overallStatus === "PASS").length;
-  const failCount  = flatResults.filter(r => r.overallStatus === "FAIL").length;
+  const total       = flatResults.length;
+  const passCount   = flatResults.filter(r => r.overallStatus === "PASS").length;
+  const failCount   = flatResults.filter(r => r.overallStatus === "FAIL").length;
   const reviewCount = flatResults.filter(r => r.overallStatus === "REVIEW").length;
-  const passRate   = total > 0 ? Math.round((passCount / total) * 100) : 0;
+  const passRate    = total > 0 ? Math.round((passCount / total) * 100) : 0;
 
   // Status donut
   const statusPieData = [
-    { name: "Pass",         value: passCount,   color: C.pass   },
-    { name: "Fail",         value: failCount,   color: C.fail   },
-    { name: "Needs Review", value: reviewCount, color: C.review },
+    { name: `Pass (${passCount})`,           value: passCount,   pct: total ? Math.round(passCount   / total * 100) : 0, color: C.pass   },
+    { name: `Fail (${failCount})`,           value: failCount,   pct: total ? Math.round(failCount   / total * 100) : 0, color: C.fail   },
+    { name: `Needs Review (${reviewCount})`, value: reviewCount, pct: total ? Math.round(reviewCount / total * 100) : 0, color: C.review },
   ].filter(d => d.value > 0);
 
   // Review decisions
@@ -136,36 +140,56 @@ function computeMetrics(
     })
     .filter(Boolean) as Array<{ name: string; Pass: number; Fail: number; Review: number }>;
 
-  // Field failure rates — horizontal bar
-  const fieldFailData = Object.entries(FIELD_LABELS)
-    .map(([key, label]) => {
-      let failed = 0, counted = 0;
-      for (const r of flatResults) {
-        const f = (r as unknown as Record<string, unknown>)[key] as { status?: string } | null | undefined;
-        if (!f || typeof f.status !== "string" || f.status === "NOT_APPLICABLE") continue;
-        counted++;
-        if (f.status === "FAIL" || f.status === "NEEDS_REVIEW") failed++;
-      }
-      if (!counted) return null;
-      return { field: label, rate: Math.round((failed / counted) * 100), failed, counted };
-    })
-    .filter(Boolean)
-    .sort((a, b) => b!.rate - a!.rate) as Array<{
-      field: string; rate: number; failed: number; counted: number;
-    }>;
+  // ── Field failure rates ────────────────────────────────────────────────────
+  // FieldResult fields: read matchStatus ("PASS" | "FAIL" | "NEEDS_REVIEW" | "NOT_APPLICABLE")
+  const fieldFailData: FailureEntry[] = [];
+
+  for (const [label, accessor] of FIELD_ACCESSORS) {
+    let failed = 0, counted = 0;
+    for (const r of flatResults) {
+      const f: FieldResult | null | undefined = accessor(r);
+      if (f == null || f.matchStatus === "NOT_APPLICABLE") continue;
+      counted++;
+      if (f.matchStatus === "FAIL" || f.matchStatus === "NEEDS_REVIEW") failed++;
+    }
+    if (!counted) continue;
+    fieldFailData.push({ field: label, rate: Math.round((failed / counted) * 100), failed, counted });
+  }
+
+  // sameFieldOfVision — SameFieldOfVisionResult uses `compliant: boolean`, no matchStatus
+  // null means "not applicable" (WINE/MALT); only SPIRITS labels have this set
+  {
+    let sfovFailed = 0, sfovCounted = 0;
+    for (const r of flatResults) {
+      const sfov: SameFieldOfVisionResult | null | undefined = r.sameFieldOfVision;
+      if (sfov == null) continue; // null/undefined = not applicable for this beverage type
+      sfovCounted++;
+      if (!sfov.compliant) sfovFailed++;
+    }
+    if (sfovCounted > 0) {
+      fieldFailData.push({
+        field:   "Same Field of Vision",
+        rate:    Math.round((sfovFailed / sfovCounted) * 100),
+        failed:  sfovFailed,
+        counted: sfovCounted,
+      });
+    }
+  }
+
+  fieldFailData.sort((a, b) => b.rate - a.rate);
 
   const topFailedField = fieldFailData[0]?.field ?? "—";
 
-  // Monthly trend (by session createdAt)
+  // Monthly trend (grouped by session createdAt)
   const monthMap = new Map<string, { pass: number; fail: number; review: number; total: number }>();
   for (const r of flatResults) {
     const d   = new Date(r.sessionCreatedAt);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     const bucket = monthMap.get(key) ?? { pass: 0, fail: 0, review: 0, total: 0 };
     bucket.total++;
-    if (r.overallStatus === "PASS")   bucket.pass++;
-    else if (r.overallStatus === "FAIL") bucket.fail++;
-    else bucket.review++;
+    if (r.overallStatus === "PASS")        bucket.pass++;
+    else if (r.overallStatus === "FAIL")   bucket.fail++;
+    else                                    bucket.review++;
     monthMap.set(key, bucket);
   }
   const monthlyData = Array.from(monthMap.entries())
@@ -192,7 +216,7 @@ function computeMetrics(
   return {
     total, passCount, failCount, reviewCount, passRate,
     statusPieData, actionBarData, byTypeData, fieldFailData, monthlyData,
-    topFailedField, mostCommonType, mostCommonTypeLabel,
+    topFailedField, mostCommonTypeLabel,
   };
 }
 
@@ -367,19 +391,34 @@ export default function AnalyticsPage() {
                         <Cell key={i} fill={entry.color} />
                       ))}
                     </Pie>
-                    <Tooltip content={<ChartTip />} />
+                    <Tooltip
+                      content={({ active, payload }) => {
+                        if (!active || !payload?.length) return null;
+                        const d = payload[0].payload as typeof m.statusPieData[0];
+                        return (
+                          <div className="bg-card border border-border rounded-lg shadow-lg px-3 py-2 text-sm">
+                            <p className="font-semibold text-foreground">{d.name}</p>
+                            <p className="text-muted-foreground">{d.value} label{d.value !== 1 ? "s" : ""} ({d.pct}%)</p>
+                          </div>
+                        );
+                      }}
+                    />
                   </PieChart>
                 </ResponsiveContainer>
-                <div className="flex justify-center gap-6 mt-2">
+
+                {/* Legend with counts + percentages */}
+                <div className="flex justify-center gap-5 mt-2 flex-wrap">
                   {[
-                    { label: "Pass",         count: m.passCount,   color: C.pass   },
-                    { label: "Fail",         count: m.failCount,   color: C.fail   },
-                    { label: "Needs Review", count: m.reviewCount, color: C.review },
-                  ].map(({ label, count, color }) => (
+                    { label: "Pass",         count: m.passCount,   pct: m.total ? Math.round(m.passCount   / m.total * 100) : 0, color: C.pass   },
+                    { label: "Fail",         count: m.failCount,   pct: m.total ? Math.round(m.failCount   / m.total * 100) : 0, color: C.fail   },
+                    { label: "Needs Review", count: m.reviewCount, pct: m.total ? Math.round(m.reviewCount / m.total * 100) : 0, color: C.review },
+                  ].map(({ label, count, pct, color }) => (
                     <div key={label} className="flex items-center gap-1.5">
                       <div className="w-3 h-3 rounded-full shrink-0" style={{ background: color }} />
                       <span className="text-xs font-semibold text-muted-foreground">
-                        {label} <strong className="text-foreground">{count}</strong>
+                        {label}:{" "}
+                        <strong className="text-foreground">{count}</strong>
+                        <span className="text-muted-foreground/70 ml-1">({pct}%)</span>
                       </span>
                     </div>
                   ))}
@@ -391,14 +430,14 @@ export default function AnalyticsPage() {
                 subtitle="Actions taken by reviewers on processed labels"
               >
                 {m.actionBarData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={200}>
+                  <ResponsiveContainer width="100%" height={220}>
                     <BarChart
                       data={m.actionBarData}
                       layout="vertical"
-                      margin={{ left: 8, right: 32, top: 4, bottom: 4 }}
+                      margin={{ left: 8, right: 40, top: 4, bottom: 4 }}
                     >
                       <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
-                      <YAxis dataKey="name" type="category" tick={{ fontSize: 11 }} width={140} />
+                      <YAxis dataKey="name" type="category" tick={{ fontSize: 11 }} width={145} />
                       <Tooltip content={<ChartTip />} />
                       <Bar dataKey="value" name="Labels" radius={[0, 4, 4, 0]}>
                         {m.actionBarData.map((entry, i) => (
@@ -408,7 +447,7 @@ export default function AnalyticsPage() {
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="flex items-center justify-center h-[200px] text-sm text-muted-foreground italic">
+                  <div className="flex items-center justify-center h-[220px] text-sm text-muted-foreground italic">
                     No review decisions recorded yet
                   </div>
                 )}
@@ -452,7 +491,7 @@ export default function AnalyticsPage() {
                   <BarChart
                     data={m.fieldFailData}
                     layout="vertical"
-                    margin={{ left: 8, right: 48, top: 4, bottom: 4 }}
+                    margin={{ left: 8, right: 52, top: 4, bottom: 4 }}
                   >
                     <XAxis
                       type="number"
@@ -464,7 +503,7 @@ export default function AnalyticsPage() {
                       dataKey="field"
                       type="category"
                       tick={{ fontSize: 11 }}
-                      width={148}
+                      width={152}
                     />
                     <Tooltip
                       content={({ active, payload, label }) => {
@@ -473,9 +512,7 @@ export default function AnalyticsPage() {
                         return (
                           <div className="bg-card border border-border rounded-lg shadow-lg px-3 py-2 text-sm">
                             <p className="font-semibold mb-1 text-foreground">{label}</p>
-                            <p className="text-muted-foreground">
-                              {payload[0].value}% failure rate
-                            </p>
+                            <p className="text-muted-foreground">{payload[0].value}% failure rate</p>
                             {d && (
                               <p className="text-muted-foreground">
                                 {d.failed} of {d.counted} labels checked
@@ -487,10 +524,7 @@ export default function AnalyticsPage() {
                     />
                     <Bar dataKey="rate" name="Failure rate %" radius={[0, 4, 4, 0]}>
                       {m.fieldFailData.map((_, i) => (
-                        <Cell
-                          key={i}
-                          fill={i < 3 ? C.fail : i < 6 ? C.review : C.muted}
-                        />
+                        <Cell key={i} fill={i < 3 ? C.fail : i < 6 ? C.review : C.muted} />
                       ))}
                     </Bar>
                   </BarChart>
@@ -498,7 +532,7 @@ export default function AnalyticsPage() {
               </ChartCard>
             )}
 
-            {/* Monthly trends — only show when ≥2 distinct months */}
+            {/* Monthly trends — only show when ≥2 distinct months of data */}
             {m.monthlyData.length >= 2 && (
               <ChartCard
                 title="Trends Over Time"
@@ -507,13 +541,9 @@ export default function AnalyticsPage() {
                 <ResponsiveContainer width="100%" height={280}>
                   <LineChart
                     data={m.monthlyData}
-                    margin={{ top: 4, right: 24, left: 0, bottom: 4 }}
+                    margin={{ top: 4, right: 32, left: 0, bottom: 4 }}
                   >
-                    <CartesianGrid
-                      strokeDasharray="3 3"
-                      vertical={false}
-                      stroke="hsl(var(--border))"
-                    />
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                     <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                     <YAxis yAxisId="left"  tick={{ fontSize: 11 }} allowDecimals={false} />
                     <YAxis
@@ -526,40 +556,20 @@ export default function AnalyticsPage() {
                     <Tooltip content={<ChartTip />} />
                     <Legend iconType="circle" iconSize={8} />
                     <Line
-                      yAxisId="left"
-                      type="monotone"
-                      dataKey="Pass"
-                      stroke={C.pass}
-                      strokeWidth={2}
-                      dot={{ r: 4 }}
-                      activeDot={{ r: 6 }}
+                      yAxisId="left"  type="monotone" dataKey="Pass"
+                      stroke={C.pass}   strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }}
                     />
                     <Line
-                      yAxisId="left"
-                      type="monotone"
-                      dataKey="Fail"
-                      stroke={C.fail}
-                      strokeWidth={2}
-                      dot={{ r: 4 }}
-                      activeDot={{ r: 6 }}
+                      yAxisId="left"  type="monotone" dataKey="Fail"
+                      stroke={C.fail}   strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }}
                     />
                     <Line
-                      yAxisId="left"
-                      type="monotone"
-                      dataKey="Review"
-                      stroke={C.review}
-                      strokeWidth={2}
-                      strokeDasharray="5 3"
-                      dot={{ r: 3 }}
+                      yAxisId="left"  type="monotone" dataKey="Review"
+                      stroke={C.review} strokeWidth={2} strokeDasharray="5 3" dot={{ r: 3 }}
                     />
                     <Line
-                      yAxisId="right"
-                      type="monotone"
-                      dataKey="Pass %"
-                      stroke={C.blue}
-                      strokeWidth={2}
-                      strokeDasharray="8 4"
-                      dot={false}
+                      yAxisId="right" type="monotone" dataKey="Pass %"
+                      stroke={C.blue}   strokeWidth={2} strokeDasharray="8 4" dot={false}
                     />
                   </LineChart>
                 </ResponsiveContainer>
@@ -572,7 +582,6 @@ export default function AnalyticsPage() {
                 All labels were checked in the same month — trends will appear once you have data across multiple months.
               </div>
             )}
-
           </>
         )}
       </div>
