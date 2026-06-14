@@ -83,7 +83,7 @@ export default function ResultsPage() {
   const [thumbnails, setThumbnails] = React.useState<Record<string, string>>({});
   const [fullImages, setFullImages] = React.useState<Record<string, string>>({});
   React.useEffect(() => {
-    if (!sessionData) return;
+    if (!sessionData?.results) return;
     const thumbMap: Record<string, string> = {};
     const fullMap: Record<string, string> = {};
     for (const r of sessionData.results) {
@@ -130,7 +130,7 @@ export default function ResultsPage() {
   // ── Per-label review decisions, loaded from localStorage ──────────────────
   const [reviewActions, setReviewActions] = React.useState<Record<string, ReturnType<typeof getSessionReviewActions>[string]>>({});
   React.useEffect(() => {
-    if (!sessionData) return;
+    if (!sessionData?.results) return;
     const ids = sessionData.results.map(r => r.labelId);
     setReviewActions(getSessionReviewActions(ids));
     // Refresh when the tab becomes visible again (agent may have made decisions on detail page)
@@ -181,7 +181,7 @@ export default function ResultsPage() {
     );
   }
 
-  if (isError || !sessionData) {
+  if (isError || !sessionData || !sessionData.results) {
     return (
       <div className="flex-1 p-8 max-w-3xl mx-auto w-full space-y-6">
         <Alert variant="destructive" className="text-base">

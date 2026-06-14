@@ -47,7 +47,7 @@ export default function AllResultsPage() {
   const flatResults = React.useMemo<FlatResult[]>(() => {
     const out: FlatResult[] = [];
     queries.forEach((q, idx) => {
-      if (!q.data) return;
+      if (!q.data?.results) return;
       const session = sessions[idx];
       for (const r of q.data.results) {
         out.push({
