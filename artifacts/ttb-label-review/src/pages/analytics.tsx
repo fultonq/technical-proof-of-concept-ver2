@@ -79,7 +79,7 @@ function useAnalyticsData() {
   const flatResults = React.useMemo<FlatResult[]>(() => {
     const out: FlatResult[] = [];
     queries.forEach((q, idx) => {
-      if (!q.data) return;
+      if (!q.data?.results) return;
       for (const r of q.data.results) {
         out.push({ ...r, sessionCreatedAt: sessions[idx].createdAt });
       }

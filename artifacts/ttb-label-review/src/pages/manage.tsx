@@ -85,7 +85,7 @@ export default function ManagePage() {
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const printReport = () => {
-    if (!sessionData || !selectedId) return;
+    if (!sessionData?.results || !selectedId) return;
     const html = generatePrintReport(sessionData, {}, selectedId, {});
     const win = window.open("", "_blank");
     if (!win) { alert("Pop-up blocked — please allow pop-ups and try again."); return; }
@@ -211,7 +211,7 @@ export default function ManagePage() {
                 </div>
               )}
 
-              {sessionData && (
+              {sessionData?.results && (
                 <div className="space-y-4">
 
                   {/* ── Report ─────────────────────────────────────────── */}
