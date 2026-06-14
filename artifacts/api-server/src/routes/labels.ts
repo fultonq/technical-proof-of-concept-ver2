@@ -139,11 +139,7 @@ router.get("/v1/labels/session/:sessionId", async (req, res) => {
   const { sessionId } = req.params;
   try {
     const results = await getSession(sessionId);
-    if (!results) {
-      res.status(404).json({ error: "Session not found" });
-      return;
-    }
-    res.json(buildBatchSummary(sessionId, results));
+    res.json(buildBatchSummary(sessionId, results ?? []));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: `Failed to retrieve session: ${message}` });
