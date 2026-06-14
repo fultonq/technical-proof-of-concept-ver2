@@ -265,7 +265,7 @@ function RecentResultsPanel({ sessionId }: { sessionId: string }) {
   const [lightbox, setLightbox]      = useState<{ src: string; alt: string } | null>(null);
 
   useEffect(() => {
-    if (!data) return;
+    if (!data?.results) return;
     const thumbMap: Record<string, string> = {};
     const fullMap: Record<string, string>  = {};
     for (const r of data.results) {
@@ -278,7 +278,7 @@ function RecentResultsPanel({ sessionId }: { sessionId: string }) {
 
   const [reviewActions, setReviewActions] = useState<Record<string, any>>({});
   useEffect(() => {
-    if (!data) return;
+    if (!data?.results) return;
     const ids = data.results.map(r => r.labelId);
     setReviewActions(getSessionReviewActions(ids));
   }, [data]);
@@ -296,7 +296,7 @@ function RecentResultsPanel({ sessionId }: { sessionId: string }) {
     );
   }
 
-  if (isError || !data || data.totalCount === 0) {
+  if (isError || !data || !data.results || data.totalCount === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full min-h-[200px] gap-3 text-center px-4">
         <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center mb-1">
