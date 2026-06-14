@@ -352,7 +352,7 @@ function RecentResultsPanel({ sessionId }: { sessionId: string }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {data.results.slice(0, 8).map(result => {
+            {(data.results ?? []).slice(0, 8).map(result => {
               const action = reviewActions[result.labelId] ?? null;
               return (
                 <tr key={result.labelId} className="hover:bg-secondary/20 transition-colors">
@@ -394,10 +394,10 @@ function RecentResultsPanel({ sessionId }: { sessionId: string }) {
                 </tr>
               );
             })}
-            {data.results.length > 8 && (
+            {(data.results ?? []).length > 8 && (
               <tr>
                 <td colSpan={5} className="px-3 py-2 text-center text-xs text-muted-foreground">
-                  +{data.results.length - 8} more — view all results
+                  +{(data.results ?? []).length - 8} more — view all results
                 </td>
               </tr>
             )}
@@ -410,7 +410,7 @@ function RecentResultsPanel({ sessionId }: { sessionId: string }) {
         <p className="text-xs text-muted-foreground">{createdDate} · {data.totalCount} label{data.totalCount !== 1 ? "s" : ""}</p>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" className="text-xs h-7 px-2.5"
-            onClick={() => exportSessionToCSV(data.results, `ttb-summary.csv`)}>
+            onClick={() => exportSessionToCSV(data.results ?? [], `ttb-summary.csv`)}>
             <Download className="w-3 h-3 mr-1" /> Download Summary
           </Button>
           <Link href="/all-results">
